@@ -3,7 +3,8 @@ export const IPC_CHANNELS = {
     getStatus: 'env:get-status'
   },
   devices: {
-    list: 'devices:list'
+    list: 'devices:list',
+    start: 'devices:start'
   },
   viewer: {
     getConfig: 'viewer:get-config',

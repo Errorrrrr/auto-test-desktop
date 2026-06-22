@@ -5,6 +5,7 @@ import type {
   AgentSession,
   AppAutoTestApi,
   DeviceInfo,
+  DeviceStartResult,
   EnvironmentStatus,
   ReportExportRequest,
   TestCaseImportRequest,
@@ -24,7 +25,8 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
       getStatus: () => invoke<EnvironmentStatus>(IPC_CHANNELS.env.getStatus)
     },
     devices: {
-      list: () => invoke<DeviceInfo[]>(IPC_CHANNELS.devices.list)
+      list: () => invoke<DeviceInfo[]>(IPC_CHANNELS.devices.list),
+      start: (deviceId: string) => invoke<DeviceStartResult>(IPC_CHANNELS.devices.start, { deviceId })
     },
     viewer: {
       getConfig: () => invoke<ViewerConfig>(IPC_CHANNELS.viewer.getConfig),

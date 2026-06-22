@@ -100,7 +100,12 @@ function createBrowserFallbackApi(): AppAutoTestApi {
       }
     },
     devices: {
-      list: async () => []
+      list: async () => [],
+      start: async (deviceId: string) => ({
+        deviceId,
+        status: 'failed',
+        detail: 'Device launch is only available in the Electron desktop runtime.'
+      })
     },
     viewer: {
       getConfig: async () => getViewerConfig({}),

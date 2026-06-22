@@ -38,8 +38,11 @@ export function createDefaultServices(options: {
     (options.devices
       ? new StaticMaestroProvider(options.devices)
       : new LocalCliMaestroProvider({
+          adbCommand: config.adbPath,
+          emulatorCommand: config.androidEmulatorPath,
           maestroCommand: config.maestroCliPath,
-          providerMode: config.maestroProvider
+          providerMode: config.maestroProvider,
+          xcrunCommand: config.xcrunPath
         }));
   const agentProvider =
     options.agentProvider ??
