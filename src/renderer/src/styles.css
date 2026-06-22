@@ -11,9 +11,16 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   min-width: 360px;
   margin: 0;
+  overflow: hidden;
 }
 
 button,
@@ -33,14 +40,20 @@ a:focus-visible {
 .app-shell {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  min-height: 0;
   padding: 24px 18px;
+  overflow: hidden;
   color: #f8fafc;
   background: #102033;
 }
@@ -93,6 +106,8 @@ a:focus-visible {
   display: grid;
   align-content: start;
   gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px;
 }
 
@@ -516,6 +531,7 @@ h2 {
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {

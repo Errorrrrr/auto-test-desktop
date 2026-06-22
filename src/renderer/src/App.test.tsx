@@ -1,9 +1,15 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { DeviceInfo, TestCaseManifest, TestReport, TestRun } from '../../shared/types';
-import { DeviceListPanel, ReportPanel, openAllowedViewerUrl } from './App';
+import { App, DeviceListPanel, ReportPanel, openAllowedViewerUrl } from './App';
 import { createReportPlaceholder } from './workbenchModel';
+
+const rendererStyles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 describe('viewer open action', () => {
   it('opens only local viewer URLs from the renderer', () => {
@@ -22,6 +28,38 @@ describe('viewer open action', () => {
 
     expect(openAllowedViewerUrl('https://example.com:10000/', opener)).toBe(false);
     expect(opener).not.toHaveBeenCalled();
+  });
+});
+
+describe('app shell scrolling', () => {
+  it('renders the sidebar beside the dedicated workspace scroll container', () => {
+    vi.stubGlobal('window', { appAutoTest: undefined });
+
+    try {
+      const html = renderToStaticMarkup(<App />);
+
+      expect(html).toContain('<main class="app-shell">');
+      expect(html).toContain('<aside class="sidebar"');
+      expect(html).toContain('<section class="workspace">');
+      expect(html.indexOf('class="sidebar"')).toBeLessThan(html.indexOf('class="workspace"'));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the document fixed and makes the workspace the vertical scroll container', () => {
+    expect(rendererStyles).toMatch(/html,\s*body,\s*#root\s*{[^}]*height:\s*100%;/s);
+    expect(rendererStyles).toMatch(/body\s*{[^}]*overflow:\s*hidden;/s);
+    expect(rendererStyles).toMatch(/\.app-shell\s*{[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden;/s);
+    expect(rendererStyles).toMatch(/\.sidebar\s*{[^}]*overflow:\s*hidden;/s);
+    expect(rendererStyles).toMatch(/\.workspace\s*{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
+  });
+
+  it('keeps the compact layout inside the fixed app shell instead of body scrolling', () => {
+    expect(rendererStyles).toMatch(
+      /@media\s*\(max-width:\s*980px\)\s*{[\s\S]*?\.app-shell\s*{[^}]*grid-template-columns:\s*1fr;[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\);/s
+    );
+    expect(rendererStyles).toMatch(/@media\s*\(max-width:\s*640px\)\s*{[\s\S]*?\.workspace\s*{[^}]*padding:\s*16px;/s);
   });
 });
 
