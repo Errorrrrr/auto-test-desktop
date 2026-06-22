@@ -9,6 +9,7 @@ import {
   MessageSquare,
   MonitorSmartphone,
   Play,
+  Power,
   RefreshCw,
   Settings2,
   Smartphone,
@@ -47,6 +48,7 @@ import {
   createReportPlaceholder,
   formatDateTime,
   formatDuration,
+  getDeviceInspectionSummary,
   formatStatusLabel,
   getErrorMessage,
   getExecutableDevices,
@@ -56,6 +58,7 @@ import {
   getSelectedDevice,
   getStatusTone,
   isExecutableDevice,
+  isStartableDevice,
   mapViewerProbeResult,
   normalizeViewerInput,
   validateCaseFile,
@@ -67,6 +70,10 @@ type ViewerOpener = (url: string, target: string, features: string) => Window | 
 type RunActionState = {
   status: AsyncStatus;
   detail: string;
+};
+
+type DeviceActionState = RunActionState & {
+  deviceId?: string;
 };
 
 type ReportContext = {
@@ -283,15 +290,23 @@ export function DeviceListPanel({
   devices,
   selectedDeviceId,
   onSelectDevice,
+  onCheckDevices,
+  onStartDevice,
+  deviceAction,
   language = 'en'
 }: {
   devices: DeviceInfo[];
   selectedDeviceId: string;
   onSelectDevice: (deviceId: string) => void;
+  onCheckDevices?: () => void;
+  onStartDevice?: (device: DeviceInfo) => void;
+  deviceAction?: DeviceActionState;
   language?: Language;
 }): ReactElement {
   const executableDevices = getExecutableDevices(devices);
+  const summary = getDeviceInspectionSummary(devices);
   const copy = COPY[language];
+  const checkingDevices = deviceAction?.status === 'busy' && !deviceAction.deviceId;
 
   return (
     <article className="panel device-panel" id="devices">
@@ -300,16 +315,36 @@ export function DeviceListPanel({
           <Smartphone size={20} aria-hidden="true" />
           <h2>{copy.titles.devices}</h2>
         </div>
-        <StatusPill
-          status={executableDevices.length ? 'ready' : 'disconnected'}
-          language={language}
-        />
+        <div className="heading-actions">
+          {onCheckDevices ? (
+            <button
+              className="icon-button"
+              disabled={checkingDevices}
+              onClick={onCheckDevices}
+              title={copy.titlesAttr.checkDevices}
+              type="button"
+            >
+              {checkingDevices ? (
+                <Loader2 className="spin" size={18} aria-hidden="true" />
+              ) : (
+                <RefreshCw size={18} aria-hidden="true" />
+              )}
+              {copy.actions.checkDevices}
+            </button>
+          ) : null}
+          <StatusPill
+            status={executableDevices.length ? 'ready' : 'disconnected'}
+            language={language}
+          />
+        </div>
       </div>
 
       {devices.length ? (
         <ul className="device-list">
           {devices.map((device) => {
             const executable = isExecutableDevice(device);
+            const startable = isStartableDevice(device);
+            const startingDevice = deviceAction?.status === 'busy' && deviceAction.deviceId === device.id;
 
             return (
               <li key={device.id} className={executable ? 'device-row' : 'device-row disabled-row'}>
@@ -328,10 +363,28 @@ export function DeviceListPanel({
                     </small>
                   </span>
                 </label>
-                <StatusPill
-                  status={device.connected ? 'ready' : 'disconnected'}
-                  language={language}
-                />
+                <div className="device-actions">
+                  <StatusPill
+                    status={device.connected ? 'ready' : 'disconnected'}
+                    language={language}
+                  />
+                  {startable && onStartDevice ? (
+                    <button
+                      className="icon-button compact-button"
+                      disabled={deviceAction?.status === 'busy'}
+                      onClick={() => onStartDevice(device)}
+                      title={copy.titlesAttr.startVirtualDevice}
+                      type="button"
+                    >
+                      {startingDevice ? (
+                        <Loader2 className="spin" size={16} aria-hidden="true" />
+                      ) : (
+                        <Power size={16} aria-hidden="true" />
+                      )}
+                      {copy.actions.startDevice}
+                    </button>
+                  ) : null}
+                </div>
               </li>
             );
           })}
@@ -340,6 +393,21 @@ export function DeviceListPanel({
         <EmptyDeviceState language={language} />
       )}
 
+      {devices.length ? (
+        <p className="muted">
+          {copy.runtime.deviceInspectionSummary(
+            summary.totalSupported,
+            summary.connected,
+            summary.virtual,
+            summary.physical
+          )}
+        </p>
+      ) : null}
+      {deviceAction ? (
+        <p className={deviceAction.status === 'error' ? 'validation-message' : 'muted'}>
+          {localizeText(deviceAction.detail, language)}
+        </p>
+      ) : null}
       {devices.length && !executableDevices.length ? <EmptyDeviceState language={language} /> : null}
     </article>
   );
@@ -451,6 +519,10 @@ export function App(): ReactElement {
     status: 'idle',
     detail: 'Runtime status has not been refreshed yet.'
   });
+  const [deviceAction, setDeviceAction] = useState<DeviceActionState>({
+    status: 'idle',
+    detail: 'Local device discovery has not been checked yet.'
+  });
   const [runAction, setRunAction] = useState<RunActionState>({
     status: 'idle',
     detail: 'No run has been started.'
@@ -516,6 +588,79 @@ export function App(): ReactElement {
   useEffect(() => {
     void refreshRuntime();
   }, []);
+
+  async function handleCheckDevices(): Promise<void> {
+    setDeviceAction({
+      status: 'busy',
+      detail: 'Checking Android/iOS physical and virtual devices.'
+    });
+
+    try {
+      const nextDevices = await api.devices.list();
+      const summary = getDeviceInspectionSummary(nextDevices);
+
+      setDevices(nextDevices);
+      setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
+      setDeviceAction({
+        status: 'success',
+        detail: `Found ${summary.totalSupported} supported device(s): ${summary.connected} connected, ${summary.virtual} virtual, ${summary.physical} physical.`
+      });
+    } catch (error) {
+      setDeviceAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
+    }
+  }
+
+  async function handleStartDevice(device: DeviceInfo): Promise<void> {
+    if (!isStartableDevice(device)) {
+      setDeviceAction({
+        status: 'error',
+        detail: `${device.name} cannot be started from the desktop client.`,
+        deviceId: device.id
+      });
+      return;
+    }
+
+    setDeviceAction({
+      status: 'busy',
+      detail: `Starting ${device.name}.`,
+      deviceId: device.id
+    });
+
+    const startDevice = api.devices.start;
+
+    if (!startDevice) {
+      setDeviceAction({
+        status: 'error',
+        detail: 'Device start is waiting for Electron main IPC.',
+        deviceId: device.id
+      });
+      return;
+    }
+
+    try {
+      const result = await startDevice(device.id);
+      const nextDevices = result.devices ?? (result.device ? devices.map((currentDevice) =>
+        currentDevice.id === result.device?.id ? result.device : currentDevice
+      ) : await api.devices.list());
+
+      setDevices(nextDevices);
+      setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
+      setDeviceAction({
+        status: result.status === 'started' || result.status === 'already_connected' ? 'success' : 'error',
+        detail: result.detail || `Device ${device.name} start returned ${result.status}.`,
+        deviceId: device.id
+      });
+    } catch (error) {
+      setDeviceAction({
+        status: 'error',
+        detail: getErrorMessage(error),
+        deviceId: device.id
+      });
+    }
+  }
 
   async function handleViewerProbe(): Promise<void> {
     const blocked = validateViewerUrl(trimmedViewerUrl);
@@ -949,6 +1094,9 @@ export function App(): ReactElement {
             devices={devices}
             selectedDeviceId={selectedDeviceId}
             onSelectDevice={setSelectedDeviceId}
+            onCheckDevices={() => void handleCheckDevices()}
+            onStartDevice={(device) => void handleStartDevice(device)}
+            deviceAction={deviceAction}
             language={language}
           />
         </section>

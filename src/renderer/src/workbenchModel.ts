@@ -44,6 +44,14 @@ export type RunReadiness = {
   selectedDevice?: DeviceInfo;
 };
 
+export type DeviceInspectionSummary = {
+  totalSupported: number;
+  connected: number;
+  virtual: number;
+  physical: number;
+  startable: number;
+};
+
 export type FileCandidate = {
   name: string;
   size: number;
@@ -69,13 +77,47 @@ export const INITIAL_UPLOAD_STATE: UploadState = createInitialUploadState();
 export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerProbeState();
 
 const EXECUTABLE_PLATFORMS = new Set(['android', 'ios']);
+const VIRTUAL_DEVICE_TYPES = new Set(['emulator', 'simulator']);
 
 export function isExecutableDevice(device: DeviceInfo): boolean {
   return EXECUTABLE_PLATFORMS.has(device.platform) && device.connected;
 }
 
+export function isSupportedMobileDevice(device: DeviceInfo): boolean {
+  return EXECUTABLE_PLATFORMS.has(device.platform);
+}
+
+export function isVirtualDevice(device: DeviceInfo): boolean {
+  return isSupportedMobileDevice(device) && VIRTUAL_DEVICE_TYPES.has(device.type);
+}
+
+export function isStartableDevice(device: DeviceInfo): boolean {
+  return isVirtualDevice(device) && !device.connected;
+}
+
 export function getExecutableDevices(devices: DeviceInfo[]): DeviceInfo[] {
   return devices.filter(isExecutableDevice);
+}
+
+export function getDeviceInspectionSummary(devices: DeviceInfo[]): DeviceInspectionSummary {
+  const supportedDevices = devices.filter(isSupportedMobileDevice);
+
+  return supportedDevices.reduce<DeviceInspectionSummary>(
+    (summary, device) => ({
+      totalSupported: summary.totalSupported + 1,
+      connected: summary.connected + (device.connected ? 1 : 0),
+      virtual: summary.virtual + (isVirtualDevice(device) ? 1 : 0),
+      physical: summary.physical + (device.type === 'physical' ? 1 : 0),
+      startable: summary.startable + (isStartableDevice(device) ? 1 : 0)
+    }),
+    {
+      totalSupported: 0,
+      connected: 0,
+      virtual: 0,
+      physical: 0,
+      startable: 0
+    }
+  );
 }
 
 export function getPreferredDeviceId(devices: DeviceInfo[], currentDeviceId: string): string {

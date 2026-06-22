@@ -124,6 +124,48 @@ describe('workbench panels', () => {
     expect(html).toContain('disconnected');
   });
 
+  it('renders a local device check entry and start action for disconnected virtual devices', () => {
+    const devices: DeviceInfo[] = [
+      {
+        id: 'android-emulator-1',
+        name: 'Pixel 8 API 35',
+        platform: 'android',
+        type: 'emulator',
+        connected: false
+      },
+      {
+        id: 'ios-physical-1',
+        name: 'Jane iPhone',
+        platform: 'ios',
+        type: 'physical',
+        connected: false
+      }
+    ];
+
+    const html = renderToStaticMarkup(
+      <DeviceListPanel
+        devices={devices}
+        selectedDeviceId=""
+        onSelectDevice={() => undefined}
+        onCheckDevices={() => undefined}
+        onStartDevice={() => undefined}
+        deviceAction={{
+          status: 'idle',
+          detail: 'Local device discovery has not been checked yet.'
+        }}
+        language="en"
+      />
+    );
+
+    expect(html).toContain('Check devices');
+    expect(html).toContain('Pixel 8 API 35');
+    expect(html).toContain('android / emulator');
+    expect(html).toContain('Start');
+    expect(html).toContain('Jane iPhone');
+    expect(html).toContain('ios / physical');
+    expect(html.match(/>Start</g)).toHaveLength(1);
+  });
+
   it('renders a failed run report with redacted report fields only', () => {
     const run: TestRun = {
       id: 'run-1',

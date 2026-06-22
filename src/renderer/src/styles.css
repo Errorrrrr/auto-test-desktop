@@ -460,6 +460,19 @@ h2 {
   flex: 0 0 auto;
 }
 
+.device-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
 .disabled-row {
   opacity: 0.72;
 }
@@ -606,6 +619,10 @@ h2 {
   .device-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .device-actions {
+    justify-content: flex-start;
   }
 
   .topbar-actions {

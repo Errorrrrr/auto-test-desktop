@@ -99,7 +99,9 @@ const EXACT_ZH: Record<string, string> = {
   'Browser fallback cannot start local runs.': '浏览器 fallback 不能启动本地运行。',
   'Browser fallback report': '浏览器 fallback 报告',
   'Checking local viewer target.': '正在检查本地 Viewer 地址。',
+  'Checking Android/iOS physical and virtual devices.': '正在检查 Android/iOS 真机与虚拟设备。',
   'Configured but not probed in the skeleton baseline.': '已配置，但骨架基线中尚未探测。',
+  'Device start is waiting for Electron main IPC.': '设备开启正在等待 Electron 主进程 IPC 接口。',
   'Directory import is reserved for a follow-up adapter and is not enabled in P0.':
     '目录导入预留给后续适配器，P0 暂未启用。',
   'Enter an Agent instruction.': '请输入 Agent 指令。',
@@ -113,6 +115,7 @@ const EXACT_ZH: Record<string, string> = {
   'Local agent command is not configured. The desktop client will not auto-launch Codex or Cursor.':
     '尚未配置本地 Agent 命令，桌面客户端不会自动启动 Codex 或 Cursor。',
   'Local agent confirmation is not available.': '本地 Agent 确认不可用。',
+  'Local device discovery has not been checked yet.': '尚未检查本地设备。',
   'Local target accepted by the renderer fallback.': 'renderer fallback 已接受本地地址。',
   'Local viewer reachability has not been checked in this session.': '本次会话尚未检查本地 Viewer 可达性。',
   'Loading runtime status.': '正在加载运行时状态。',
@@ -182,11 +185,15 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
     [/^Cancelling (.+)\.$/, (match) => `正在取消 ${match[1]}。`],
     [/^Direct MCP calls are not available inside the desktop client; CLI fallback is available \((.+)\)\.$/, (match) => `桌面客户端内不可直接调用 MCP；CLI fallback 可用（${match[1]}）。`],
     [/^File is larger than (.+) MB\.$/, (match) => `文件超过 ${match[1]} MB。`],
+    [/^Found (\d+) supported device\(s\): (\d+) connected, (\d+) virtual, (\d+) physical\.$/, (match) => `发现 ${match[1]} 台受支持设备：${match[2]} 台已连接，${match[3]} 台虚拟设备，${match[4]} 台真机。`],
     [/^Last refreshed (.+)\.$/, (match) => `上次刷新：${match[1]}。`],
     [/^Maestro CLI is available \((.+)\)\.$/, (match) => `Maestro CLI 可用（${match[1]}）。`],
     [/^Maestro MCP\/CLI is unavailable: (.+)$/, (match) => `Maestro MCP/CLI 不可用：${match[1]}`],
     [/^Markdown exported to (.+)\.$/, (match) => `Markdown 已导出到 ${match[1]}。`],
     [/^Ready for (.+)\.$/, (match) => `已准备好在 ${match[1]} 上运行。`],
+    [/^Starting (.+)\.$/, (match) => `正在开启 ${match[1]}。`],
+    [/^(.+) cannot be started from the desktop client\.$/, (match) => `${match[1]} 不能从桌面客户端开启。`],
+    [/^Device (.+) start returned (.+)\.$/, (match) => `设备 ${match[1]} 开启返回：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) did not reach (.+)\.$/, (match) => `运行 ${match[1]} 未达到 ${match[2]}。`],
     [/^Run (.+) finished as (.+)\.$/, (match) => `运行 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) is (.+)\.$/, (match) => `运行 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
@@ -254,10 +261,12 @@ export const COPY = {
     },
     actions: {
       cancel: '取消',
+      checkDevices: '检查设备',
       export: '导出',
       open: '打开',
       probe: '探测',
       refresh: '刷新',
+      startDevice: '开启',
       startRun: '开始运行'
     },
     titles: {
@@ -282,6 +291,7 @@ export const COPY = {
     fields: {
       case: '用例',
       device: '设备',
+      devices: '设备',
       duration: '耗时',
       format: '格式',
       generated: '生成时间',
@@ -299,13 +309,21 @@ export const COPY = {
     },
     titlesAttr: {
       cancelRun: '取消运行',
+      checkDevices: '检查本地设备',
       exportMarkdown: '导出 Markdown 报告',
       openLocalViewer: '打开本地 Viewer',
       probeViewer: '探测 Viewer',
       refreshRuntime: '刷新运行时',
+      startVirtualDevice: '开启虚拟设备',
       viewerUrlMustBeLocal: 'Viewer URL 必须是本地地址'
     },
     runtime: {
+      deviceInspectionSummary: (
+        totalSupported: number,
+        connected: number,
+        virtual: number,
+        physical: number
+      ) => `发现 ${totalSupported} 台受支持设备：${connected} 台已连接，${virtual} 台虚拟设备，${physical} 台真机`,
       generated: (value: string) => `生成时间：${value}`,
       session: (value: string) => `会话：${value}`,
       executableDevices: (count: number) => `${count} 台可执行设备`,
@@ -360,10 +378,12 @@ export const COPY = {
     },
     actions: {
       cancel: 'Cancel',
+      checkDevices: 'Check devices',
       export: 'Export',
       open: 'Open',
       probe: 'Probe',
       refresh: 'Refresh',
+      startDevice: 'Start',
       startRun: 'Start Run'
     },
     titles: {
@@ -388,6 +408,7 @@ export const COPY = {
     fields: {
       case: 'Case',
       device: 'Device',
+      devices: 'Devices',
       duration: 'Duration',
       format: 'Format',
       generated: 'Generated',
@@ -405,13 +426,21 @@ export const COPY = {
     },
     titlesAttr: {
       cancelRun: 'Cancel run',
+      checkDevices: 'Check local devices',
       exportMarkdown: 'Export Markdown report',
       openLocalViewer: 'Open local viewer',
       probeViewer: 'Probe viewer',
       refreshRuntime: 'Refresh runtime',
+      startVirtualDevice: 'Start virtual device',
       viewerUrlMustBeLocal: 'Viewer URL must be local'
     },
     runtime: {
+      deviceInspectionSummary: (
+        totalSupported: number,
+        connected: number,
+        virtual: number,
+        physical: number
+      ) => `Found ${totalSupported} supported device(s): ${connected} connected, ${virtual} virtual, ${physical} physical`,
       generated: (value: string) => `Generated: ${value}`,
       session: (value: string) => `Session: ${value}`,
       executableDevices: (count: number) => `${count} executable device(s)`,

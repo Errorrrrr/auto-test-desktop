@@ -28,6 +28,20 @@ export interface DeviceInfo {
   connected: boolean;
 }
 
+export type DeviceStartStatus =
+  | 'started'
+  | 'already_connected'
+  | 'unsupported'
+  | 'unavailable'
+  | 'failed';
+
+export interface DeviceStartResult {
+  device?: DeviceInfo;
+  devices?: DeviceInfo[];
+  status: DeviceStartStatus;
+  detail: string;
+}
+
 export interface EnvironmentStatus {
   generatedAt: string;
   agent: ServiceHealth;
@@ -195,6 +209,7 @@ export interface AppAutoTestApi {
   };
   devices: {
     list: () => Promise<DeviceInfo[]>;
+    start?: (deviceId: string) => Promise<DeviceStartResult>;
   };
   viewer: {
     getConfig: () => Promise<ViewerConfig>;

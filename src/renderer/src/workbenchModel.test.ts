@@ -11,7 +11,10 @@ import {
   createCaseImportRequest,
   createReportPlaceholder,
   formatStatusLabel,
+  getDeviceInspectionSummary,
   getRunReadiness,
+  isStartableDevice,
+  isVirtualDevice,
   mapViewerProbeResult,
   validateCaseFile,
   validateViewerUrl
@@ -31,6 +34,14 @@ const disconnectedDevice: DeviceInfo = {
   name: 'iPhone 16',
   platform: 'ios',
   type: 'simulator',
+  connected: false
+};
+
+const disconnectedPhysicalDevice: DeviceInfo = {
+  id: 'ios-physical-1',
+  name: 'Jane iPhone',
+  platform: 'ios',
+  type: 'physical',
   connected: false
 };
 
@@ -110,6 +121,38 @@ describe('workbench run readiness', () => {
     expect(readiness.canStart).toBe(true);
     expect(readiness.reasons).toEqual([]);
     expect(readiness.selectedDevice).toEqual(connectedDevice);
+  });
+});
+
+describe('workbench device inspection', () => {
+  it('counts Android and iOS physical plus virtual devices separately', () => {
+    const summary = getDeviceInspectionSummary([
+      connectedDevice,
+      disconnectedDevice,
+      disconnectedPhysicalDevice,
+      {
+        id: 'web-1',
+        name: 'Chrome',
+        platform: 'web',
+        type: 'unknown',
+        connected: true
+      }
+    ]);
+
+    expect(summary.totalSupported).toBe(3);
+    expect(summary.connected).toBe(1);
+    expect(summary.virtual).toBe(2);
+    expect(summary.physical).toBe(1);
+    expect(summary.startable).toBe(1);
+  });
+
+  it('allows only disconnected Android emulators and iOS simulators to show start actions', () => {
+    expect(isVirtualDevice(connectedDevice)).toBe(true);
+    expect(isVirtualDevice(disconnectedDevice)).toBe(true);
+    expect(isVirtualDevice(disconnectedPhysicalDevice)).toBe(false);
+    expect(isStartableDevice(disconnectedDevice)).toBe(true);
+    expect(isStartableDevice(connectedDevice)).toBe(false);
+    expect(isStartableDevice(disconnectedPhysicalDevice)).toBe(false);
   });
 });
 
