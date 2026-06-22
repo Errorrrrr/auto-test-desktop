@@ -13,6 +13,14 @@ import type {
 } from '../../shared/types';
 import { redactReportText } from '../../shared/redaction';
 import { isAllowedLocalViewerUrl, normalizeViewerUrl } from '../../shared/viewerConfig';
+import {
+  COPY,
+  DATE_LOCALES,
+  DEFAULT_LANGUAGE,
+  Language,
+  getStatusLabel,
+  localizeText
+} from './rendererI18n';
 
 export const MAX_UPLOAD_SIZE_MB = 25;
 export const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
@@ -42,16 +50,23 @@ export type FileCandidate = {
   path?: string;
 };
 
-export const INITIAL_UPLOAD_STATE: UploadState = {
-  name: '',
-  status: 'idle',
-  detail: `Supported formats: .yaml, .yml. Maximum size: ${MAX_UPLOAD_SIZE_MB} MB.`
-};
+export function createInitialUploadState(language: Language = DEFAULT_LANGUAGE): UploadState {
+  return {
+    name: '',
+    status: 'idle',
+    detail: localizeText(`Supported formats: .yaml, .yml. Maximum size: ${MAX_UPLOAD_SIZE_MB} MB.`, language)
+  };
+}
 
-export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = {
-  status: 'unchecked',
-  detail: 'Local viewer reachability has not been checked in this session.'
-};
+export function createInitialViewerProbeState(language: Language = DEFAULT_LANGUAGE): ViewerProbeState {
+  return {
+    status: 'unchecked',
+    detail: localizeText('Local viewer reachability has not been checked in this session.', language)
+  };
+}
+
+export const INITIAL_UPLOAD_STATE: UploadState = createInitialUploadState('en');
+export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerProbeState('en');
 
 const EXECUTABLE_PLATFORMS = new Set(['android', 'ios']);
 
@@ -88,30 +103,30 @@ export function getRunReadiness(input: {
   selectedDeviceId: string;
   importedCase: TestCaseManifest | null;
   prompt: string;
-}): RunReadiness {
+}, language: Language = DEFAULT_LANGUAGE): RunReadiness {
   const selectedDevice = getSelectedDevice(input.devices, input.selectedDeviceId);
   const reasons: string[] = [];
 
   if (!input.environment) {
-    reasons.push('Runtime status is still loading.');
+    reasons.push(localizeText('Runtime status is still loading.', language));
   }
 
   if (!selectedDevice) {
-    reasons.push('Select a connected Android or iOS device.');
+    reasons.push(localizeText('Select a connected Android or iOS device.', language));
   } else if (!isExecutableDevice(selectedDevice)) {
-    reasons.push('Selected device is not connected for execution.');
+    reasons.push(localizeText('Selected device is not connected for execution.', language));
   }
 
   if (!input.importedCase || input.importedCase.status !== 'imported') {
-    reasons.push('Import a valid Maestro test case.');
+    reasons.push(localizeText('Import a valid Maestro test case.', language));
   }
 
   if (!input.prompt.trim()) {
-    reasons.push('Enter an Agent instruction.');
+    reasons.push(localizeText('Enter an Agent instruction.', language));
   }
 
   if (input.environment && !input.environment.canStartRun) {
-    reasons.push(...input.environment.blockers);
+    reasons.push(...input.environment.blockers.map((blocker) => localizeText(blocker, language)));
   }
 
   const uniqueReasons = uniqueMessages(reasons);
@@ -123,22 +138,25 @@ export function getRunReadiness(input: {
   };
 }
 
-export function validateViewerUrl(value: string): ViewerProbeState | null {
+export function validateViewerUrl(value: string, language: Language = DEFAULT_LANGUAGE): ViewerProbeState | null {
   if (isAllowedLocalViewerUrl(value)) {
     return null;
   }
 
   return {
     status: 'blocked',
-    detail: 'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
+    detail: localizeText('Viewer URL must point to localhost, 127.0.0.1, or ::1.', language)
   };
 }
 
-export function mapViewerProbeResult(result: ViewerProbeResult): ViewerProbeState {
+export function mapViewerProbeResult(
+  result: ViewerProbeResult,
+  language: Language = DEFAULT_LANGUAGE
+): ViewerProbeState {
   if (!result.allowed) {
     return {
       status: 'blocked',
-      detail: result.detail
+      detail: localizeText(result.detail, language)
     };
   }
 
@@ -150,29 +168,32 @@ export function mapViewerProbeResult(result: ViewerProbeResult): ViewerProbeStat
 
   return {
     status: reachableToStatus[result.reachable],
-    detail: result.detail
+    detail: localizeText(result.detail, language)
   };
 }
 
-export function validateCaseFile(file: FileCandidate): { valid: true } | { valid: false; detail: string } {
+export function validateCaseFile(
+  file: FileCandidate,
+  language: Language = DEFAULT_LANGUAGE
+): { valid: true } | { valid: false; detail: string } {
   if (!/\.ya?ml$/i.test(file.name)) {
     return {
       valid: false,
-      detail: 'Supported formats: .yaml, .yml.'
+      detail: localizeText('Supported formats: .yaml, .yml.', language)
     };
   }
 
   if (file.size <= 0) {
     return {
       valid: false,
-      detail: 'The selected file is empty.'
+      detail: localizeText('The selected file is empty.', language)
     };
   }
 
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
     return {
       valid: false,
-      detail: `File is larger than ${MAX_UPLOAD_SIZE_MB} MB.`
+      detail: localizeText(`File is larger than ${MAX_UPLOAD_SIZE_MB} MB.`, language)
     };
   }
 
@@ -186,30 +207,30 @@ export function createCaseImportRequest(file: FileCandidate): TestCaseImportRequ
   };
 }
 
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: unknown, language: Language = DEFAULT_LANGUAGE): string {
   if (error instanceof Error && error.message) {
-    return error.message;
+    return localizeText(error.message, language);
   }
 
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const message = (error as { message?: unknown }).message;
 
     if (typeof message === 'string' && message) {
-      return message;
+      return localizeText(message, language);
     }
   }
 
-  return 'Unexpected local runtime error.';
+  return localizeText('Unexpected local runtime error.', language);
 }
 
-export function formatDateTime(value: string): string {
+export function formatDateTime(value: string, language: Language = DEFAULT_LANGUAGE): string {
   const timestamp = Date.parse(value);
 
   if (Number.isNaN(timestamp)) {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(DATE_LOCALES[language], {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -218,12 +239,12 @@ export function formatDateTime(value: string): string {
   }).format(timestamp);
 }
 
-export function formatDuration(start: string, end: string): string {
+export function formatDuration(start: string, end: string, language: Language = DEFAULT_LANGUAGE): string {
   const startMs = Date.parse(start);
   const endMs = Date.parse(end);
 
   if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
-    return 'Pending';
+    return localizeText('Pending', language);
   }
 
   const seconds = Math.max(1, Math.round((endMs - startMs) / 1000));
@@ -231,8 +252,8 @@ export function formatDuration(start: string, end: string): string {
   return `${seconds}s`;
 }
 
-export function formatStatusLabel(status: string): string {
-  return status.replace(/_/g, ' ');
+export function formatStatusLabel(status: string, language: Language = DEFAULT_LANGUAGE): string {
+  return getStatusLabel(status, language);
 }
 
 export function getStatusTone(status: ServiceStatus | TestRunStatus | string): string {
@@ -272,19 +293,23 @@ export function createReportPlaceholder(input: {
   device?: DeviceInfo;
   testCase?: TestCaseManifest;
   error?: string;
-}): TestReport {
+}, language: Language = DEFAULT_LANGUAGE): TestReport {
   const { run, device, testCase, error } = input;
+  const copy = COPY[language];
   const failureReason = redactReportText(run.failureReason);
-  const summary = redactReportText(error) ?? failureReason ?? 'Run accepted by the local runtime.';
+  const summary =
+    localizeText(redactReportText(error) ?? failureReason ?? 'Run accepted by the local runtime.', language);
   const target = device ? `${device.name} (${device.platform})` : run.deviceId;
   const testCaseName = testCase?.name ?? run.caseId;
   const safeTarget = redactReportText(target) ?? '';
   const safeTestCaseName = redactReportText(testCaseName) ?? '';
   const prompt = redactReportText(run.prompt) ?? '';
+  const markdownLabels = copy.report.markdownLabels;
+  const localizedFailureReason = failureReason ? localizeText(failureReason, language) : failureReason;
 
   return {
     runId: run.id,
-    title: `Test report for ${safeTestCaseName}`,
+    title: copy.report.placeholderTitle(safeTestCaseName),
     status: run.status,
     generatedAt: run.updatedAt,
     summary,
@@ -293,24 +318,27 @@ export function createReportPlaceholder(input: {
     prompt,
     startedAt: run.startedAt ?? run.createdAt,
     endedAt: run.completedAt ?? run.updatedAt,
-    conclusion: formatStatusLabel(run.status),
-    failureReason,
+    conclusion: formatStatusLabel(run.status, language),
+    failureReason: localizedFailureReason,
     markdown: [
-      '# Test report',
+      `# ${copy.report.markdownHeading}`,
       '',
-      `- Run: ${run.id}`,
-      `- Status: ${run.status}`,
-      `- Target: ${safeTarget}`,
-      `- Case: ${safeTestCaseName}`,
-      `- Prompt: ${prompt}`,
-      `- Duration: ${formatDuration(run.createdAt, run.updatedAt)}`,
-      ...(failureReason ? [`- Failure: ${failureReason}`] : [])
+      `- ${markdownLabels.run}: ${run.id}`,
+      `- ${markdownLabels.status}: ${formatStatusLabel(run.status, language)}`,
+      `- ${markdownLabels.target}: ${safeTarget}`,
+      `- ${markdownLabels.case}: ${safeTestCaseName}`,
+      `- ${markdownLabels.prompt}: ${prompt}`,
+      `- ${markdownLabels.duration}: ${formatDuration(run.createdAt, run.updatedAt, language)}`,
+      ...(localizedFailureReason ? [`- ${markdownLabels.failure}: ${localizedFailureReason}`] : [])
     ].join('\n')
   };
 }
 
-export function getReportFormatLabel(format: ReportFormat): string {
-  return format === 'markdown' ? 'Markdown' : 'Page';
+export function getReportFormatLabel(
+  format: ReportFormat,
+  language: Language = DEFAULT_LANGUAGE
+): string {
+  return format === 'markdown' ? COPY[language].report.markdown : COPY[language].report.page;
 }
 
 export function normalizeViewerInput(value: string): string {

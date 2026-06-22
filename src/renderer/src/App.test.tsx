@@ -32,6 +32,46 @@ describe('viewer open action', () => {
 });
 
 describe('app shell scrolling', () => {
+  it('renders Chinese UI copy by default with a language switcher', () => {
+    vi.stubGlobal('window', {
+      appAutoTest: undefined,
+      localStorage: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn()
+      }
+    });
+
+    try {
+      const html = renderToStaticMarkup(<App />);
+
+      expect(html).toContain('自动化测试工作台');
+      expect(html).toContain('中文');
+      expect(html).toContain('English');
+      expect(html).toContain('刷新');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses the persisted English language selection on first render', () => {
+    vi.stubGlobal('window', {
+      appAutoTest: undefined,
+      localStorage: {
+        getItem: vi.fn(() => 'en'),
+        setItem: vi.fn()
+      }
+    });
+
+    try {
+      const html = renderToStaticMarkup(<App />);
+
+      expect(html).toContain('Automation Workbench');
+      expect(html).toContain('Refresh');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('renders the sidebar beside the dedicated workspace scroll container', () => {
     vi.stubGlobal('window', { appAutoTest: undefined });
 

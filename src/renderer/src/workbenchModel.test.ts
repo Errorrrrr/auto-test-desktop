@@ -7,8 +7,10 @@ import type {
   TestRun
 } from '../../shared/types';
 import {
+  createInitialUploadState,
   createCaseImportRequest,
   createReportPlaceholder,
+  formatStatusLabel,
   getRunReadiness,
   mapViewerProbeResult,
   validateCaseFile
@@ -87,7 +89,7 @@ describe('workbench run readiness', () => {
       selectedDeviceId: disconnectedDevice.id,
       importedCase,
       prompt: 'Run smoke'
-    });
+    }, 'en');
 
     expect(readiness.canStart).toBe(false);
     expect(readiness.reasons).toContain('Selected device is not connected for execution.');
@@ -101,7 +103,7 @@ describe('workbench run readiness', () => {
       selectedDeviceId: connectedDevice.id,
       importedCase,
       prompt: 'Run smoke'
-    });
+    }, 'en');
 
     expect(readiness.canStart).toBe(true);
     expect(readiness.reasons).toEqual([]);
@@ -111,15 +113,15 @@ describe('workbench run readiness', () => {
 
 describe('workbench upload and viewer rules', () => {
   it('rejects unsupported or oversized test case files before import', () => {
-    expect(validateCaseFile({ name: 'notes.txt', size: 10 })).toEqual({
+    expect(validateCaseFile({ name: 'notes.txt', size: 10 }, 'en')).toEqual({
       valid: false,
       detail: 'Supported formats: .yaml, .yml.'
     });
-    expect(validateCaseFile({ name: 'flows.zip', size: 10 })).toEqual({
+    expect(validateCaseFile({ name: 'flows.zip', size: 10 }, 'en')).toEqual({
       valid: false,
       detail: 'Supported formats: .yaml, .yml.'
     });
-    expect(validateCaseFile({ name: 'flow.yaml', size: 26 * 1024 * 1024 })).toEqual({
+    expect(validateCaseFile({ name: 'flow.yaml', size: 26 * 1024 * 1024 }, 'en')).toEqual({
       valid: false,
       detail: 'File is larger than 25 MB.'
     });
@@ -145,7 +147,7 @@ describe('workbench upload and viewer rules', () => {
         allowed: true,
         reachable: 'unchecked',
         detail: 'Local target accepted.'
-      })
+      }, 'en')
     ).toEqual({
       status: 'accepted',
       detail: 'Local target accepted.'
@@ -169,7 +171,7 @@ describe('workbench report placeholder', () => {
       run,
       device: connectedDevice,
       testCase: importedCase
-    });
+    }, 'en');
 
     expect(report.status).toBe('failed');
     expect(report.summary).toBe(
@@ -203,7 +205,7 @@ describe('workbench report placeholder', () => {
       device: connectedDevice,
       testCase: importedCase,
       error: 'Report fallback failed with password=hunter2 at /Users/alice/.maestro'
-    });
+    }, 'en');
 
     const serializedReport = JSON.stringify(report);
 
@@ -216,5 +218,29 @@ describe('workbench report placeholder', () => {
     );
     expect(report.markdown).toContain('api_key=[REDACTED] in /Users/[REDACTED]/.maestro');
     expect(report.markdown).toContain('token=[REDACTED] failed for /Users/[REDACTED]/.maestro');
+  });
+});
+
+describe('workbench localization', () => {
+  it('uses Chinese copy by default for upload and status labels', () => {
+    expect(createInitialUploadState().detail).toBe('支持格式：.yaml、.yml。最大 25 MB。');
+    expect(formatStatusLabel('not_configured')).toBe('未配置');
+  });
+
+  it('localizes readiness and upload validation messages', () => {
+    const readiness = getRunReadiness({
+      environment: null,
+      devices: [],
+      selectedDeviceId: '',
+      importedCase: null,
+      prompt: ''
+    });
+
+    expect(readiness.reasons).toContain('正在加载运行时状态。');
+    expect(readiness.reasons).toContain('请选择已连接的 Android 或 iOS 设备。');
+    expect(validateCaseFile({ name: 'notes.txt', size: 10 })).toEqual({
+      valid: false,
+      detail: '支持格式：.yaml、.yml。'
+    });
   });
 });
