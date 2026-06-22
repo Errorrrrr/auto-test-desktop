@@ -13,8 +13,10 @@ import {
   formatStatusLabel,
   getRunReadiness,
   mapViewerProbeResult,
-  validateCaseFile
+  validateCaseFile,
+  validateViewerUrl
 } from './workbenchModel';
+import { localizeText } from './rendererI18n';
 
 const connectedDevice: DeviceInfo = {
   id: 'android-1',
@@ -89,7 +91,7 @@ describe('workbench run readiness', () => {
       selectedDeviceId: disconnectedDevice.id,
       importedCase,
       prompt: 'Run smoke'
-    }, 'en');
+    });
 
     expect(readiness.canStart).toBe(false);
     expect(readiness.reasons).toContain('Selected device is not connected for execution.');
@@ -103,7 +105,7 @@ describe('workbench run readiness', () => {
       selectedDeviceId: connectedDevice.id,
       importedCase,
       prompt: 'Run smoke'
-    }, 'en');
+    });
 
     expect(readiness.canStart).toBe(true);
     expect(readiness.reasons).toEqual([]);
@@ -113,15 +115,15 @@ describe('workbench run readiness', () => {
 
 describe('workbench upload and viewer rules', () => {
   it('rejects unsupported or oversized test case files before import', () => {
-    expect(validateCaseFile({ name: 'notes.txt', size: 10 }, 'en')).toEqual({
+    expect(validateCaseFile({ name: 'notes.txt', size: 10 })).toEqual({
       valid: false,
       detail: 'Supported formats: .yaml, .yml.'
     });
-    expect(validateCaseFile({ name: 'flows.zip', size: 10 }, 'en')).toEqual({
+    expect(validateCaseFile({ name: 'flows.zip', size: 10 })).toEqual({
       valid: false,
       detail: 'Supported formats: .yaml, .yml.'
     });
-    expect(validateCaseFile({ name: 'flow.yaml', size: 26 * 1024 * 1024 }, 'en')).toEqual({
+    expect(validateCaseFile({ name: 'flow.yaml', size: 26 * 1024 * 1024 })).toEqual({
       valid: false,
       detail: 'File is larger than 25 MB.'
     });
@@ -147,7 +149,7 @@ describe('workbench upload and viewer rules', () => {
         allowed: true,
         reachable: 'unchecked',
         detail: 'Local target accepted.'
-      }, 'en')
+      })
     ).toEqual({
       status: 'accepted',
       detail: 'Local target accepted.'
@@ -222,12 +224,15 @@ describe('workbench report placeholder', () => {
 });
 
 describe('workbench localization', () => {
-  it('uses Chinese copy by default for upload and status labels', () => {
-    expect(createInitialUploadState().detail).toBe('支持格式：.yaml、.yml。最大 25 MB。');
+  it('keeps initial upload detail canonical while status labels default to Chinese', () => {
+    expect(createInitialUploadState().detail).toBe('Supported formats: .yaml, .yml. Maximum size: 25 MB.');
+    expect(localizeText(createInitialUploadState().detail, 'zh')).toBe(
+      '支持格式：.yaml、.yml。最大 25 MB。'
+    );
     expect(formatStatusLabel('not_configured')).toBe('未配置');
   });
 
-  it('localizes readiness and upload validation messages', () => {
+  it('keeps readiness and upload validation messages canonical for render-time localization', () => {
     const readiness = getRunReadiness({
       environment: null,
       devices: [],
@@ -236,11 +241,68 @@ describe('workbench localization', () => {
       prompt: ''
     });
 
-    expect(readiness.reasons).toContain('正在加载运行时状态。');
-    expect(readiness.reasons).toContain('请选择已连接的 Android 或 iOS 设备。');
+    expect(readiness.reasons).toContain('Runtime status is still loading.');
+    expect(readiness.reasons).toContain('Select a connected Android or iOS device.');
+    expect(readiness.reasons.map((reason) => localizeText(reason, 'zh'))).toContain(
+      '正在加载运行时状态。'
+    );
+    expect(readiness.reasons.map((reason) => localizeText(reason, 'zh'))).toContain(
+      '请选择已连接的 Android 或 iOS 设备。'
+    );
     expect(validateCaseFile({ name: 'notes.txt', size: 10 })).toEqual({
       valid: false,
-      detail: '支持格式：.yaml、.yml。'
+      detail: 'Supported formats: .yaml, .yml.'
     });
+  });
+
+  it('keeps upload validation details canonical so the same state re-renders after switching language', () => {
+    const validation = validateCaseFile({ name: 'notes.txt', size: 10 });
+
+    expect(validation).toEqual({
+      valid: false,
+      detail: 'Supported formats: .yaml, .yml.'
+    });
+
+    if (!validation.valid) {
+      expect(localizeText(validation.detail, 'zh')).toBe('支持格式：.yaml、.yml。');
+      expect(localizeText(validation.detail, 'en')).toBe('Supported formats: .yaml, .yml.');
+    }
+  });
+
+  it('keeps viewer blocked details canonical so the same state re-renders after switching language', () => {
+    const blockedState = validateViewerUrl('https://example.com:10000/')!;
+
+    expect(blockedState).toEqual({
+      status: 'blocked',
+      detail: 'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
+    });
+    expect(localizeText(blockedState.detail, 'zh')).toBe(
+      'Viewer URL 必须指向 localhost、127.0.0.1 或 ::1。'
+    );
+    expect(localizeText(blockedState.detail, 'en')).toBe(
+      'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
+    );
+  });
+
+  it('keeps fallback report placeholder fields canonical for render-time localization', () => {
+    const report = createReportPlaceholder({
+      run: {
+        id: 'run-3',
+        caseId: importedCase.id,
+        deviceId: connectedDevice.id,
+        prompt: 'Run smoke',
+        status: 'blocked',
+        createdAt: '2026-06-12T06:00:00Z',
+        updatedAt: '2026-06-12T06:00:01Z'
+      },
+      device: connectedDevice,
+      testCase: importedCase,
+      error: 'Report generation requires the Electron main process.'
+    });
+
+    expect(report.title).toBe('Test report for smoke.yaml');
+    expect(report.summary).toBe('Report generation requires the Electron main process.');
+    expect(localizeText(report.title, 'zh')).toBe('测试报告：smoke.yaml');
+    expect(localizeText(report.summary, 'zh')).toBe('报告生成需要 Electron 主进程。');
   });
 });

@@ -82,8 +82,8 @@ function isTerminalRunStatus(status: TestRun['status']): boolean {
   return TERMINAL_RUN_STATUSES.has(status);
 }
 
-function createBrowserFallbackApi(language: Language): AppAutoTestApi {
-  const copy = COPY[language];
+function createBrowserFallbackApi(): AppAutoTestApi {
+  const copy = COPY.en;
 
   return {
     env: {
@@ -158,7 +158,7 @@ function createBrowserFallbackApi(language: Language): AppAutoTestApi {
     reports: {
       get: async (runId) => {
         const generatedAt = new Date().toISOString();
-        const summary = localizeText('Report generation requires the Electron main process.', language);
+        const summary = 'Report generation requires the Electron main process.';
 
         return {
           runId,
@@ -171,18 +171,18 @@ function createBrowserFallbackApi(language: Language): AppAutoTestApi {
           prompt: '',
           startedAt: generatedAt,
           endedAt: generatedAt,
-          conclusion: localizeText('Blocked before execution', language),
+          conclusion: 'Blocked before execution',
           failureReason: summary,
           markdown: `# ${copy.report.fallbackTitle}\n\n${summary}`
         };
       },
       export: async (request) => {
         const generatedAt = new Date().toISOString();
-        const summary = localizeText('Report export requires the Electron main process.', language);
+        const summary = 'Report export requires the Electron main process.';
 
         return {
           runId: request.runId,
-          title: `${getReportFormatLabel(request.format, language)} ${copy.report.fallbackTitle}`,
+          title: `${getReportFormatLabel(request.format, 'en')} ${copy.report.fallbackTitle}`,
           status: 'blocked',
           generatedAt,
           summary,
@@ -191,7 +191,7 @@ function createBrowserFallbackApi(language: Language): AppAutoTestApi {
           prompt: '',
           startedAt: generatedAt,
           endedAt: generatedAt,
-          conclusion: localizeText('Blocked before execution', language),
+          conclusion: 'Blocked before execution',
           failureReason: summary,
           markdown: `# ${copy.report.fallbackTitle}\n\n${summary}`
         };
@@ -207,15 +207,15 @@ function createBrowserFallbackApi(language: Language): AppAutoTestApi {
         id: `browser-message-${Date.now()}`,
         sessionId: request.sessionId,
         role: 'assistant',
-        content: localizeText('Browser fallback cannot reach local agents.', language),
+        content: 'Browser fallback cannot reach local agents.',
         createdAt: new Date().toISOString()
       })
     }
   };
 }
 
-function getApi(language: Language): AppAutoTestApi {
-  return window.appAutoTest ?? createBrowserFallbackApi(language);
+function getApi(): AppAutoTestApi {
+  return window.appAutoTest ?? createBrowserFallbackApi();
 }
 
 function StatusPill({ status, language }: { status: string; language: Language }): ReactElement {
@@ -440,10 +440,10 @@ export function App(): ReactElement {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [viewerConfig, setViewerConfig] = useState<ViewerConfig | null>(null);
   const [viewerUrl, setViewerUrl] = useState(getViewerConfig({}).url);
-  const [viewerProbe, setViewerProbe] = useState<ViewerProbeState>(() => createInitialViewerProbeState(language));
+  const [viewerProbe, setViewerProbe] = useState<ViewerProbeState>(() => createInitialViewerProbeState());
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [uploadState, setUploadState] = useState<UploadState>(() => createInitialUploadState(language));
+  const [uploadState, setUploadState] = useState<UploadState>(() => createInitialUploadState());
   const [importedCase, setImportedCase] = useState<TestCaseManifest | null>(null);
   const [agentSession, setAgentSession] = useState<AgentSession | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
@@ -464,7 +464,7 @@ export function App(): ReactElement {
   const [reportContext, setReportContext] = useState<ReportContext | null>(null);
 
   const copy = COPY[language];
-  const api = useMemo(() => getApi(language), [language]);
+  const api = useMemo(() => getApi(), []);
   const readiness = useMemo(
     () =>
       getRunReadiness({
@@ -473,8 +473,8 @@ export function App(): ReactElement {
         selectedDeviceId,
         importedCase,
         prompt
-      }, language),
-    [devices, environment, importedCase, language, prompt, selectedDeviceId]
+      }),
+    [devices, environment, importedCase, prompt, selectedDeviceId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
   const runtimeGeneratedAt = environment ? formatDateTime(environment.generatedAt, language) : copy.runtime.notLoaded;
@@ -508,7 +508,7 @@ export function App(): ReactElement {
     } catch (error) {
       setRuntimeState({
         status: 'error',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -518,7 +518,7 @@ export function App(): ReactElement {
   }, []);
 
   async function handleViewerProbe(): Promise<void> {
-    const blocked = validateViewerUrl(trimmedViewerUrl, language);
+    const blocked = validateViewerUrl(trimmedViewerUrl);
 
     if (blocked) {
       setViewerProbe(blocked);
@@ -533,11 +533,11 @@ export function App(): ReactElement {
     try {
       const result = await api.viewer.probe(trimmedViewerUrl);
       setViewerUrl(result.url);
-      setViewerProbe(mapViewerProbeResult(result, language));
+      setViewerProbe(mapViewerProbeResult(result));
     } catch (error) {
       setViewerProbe({
         status: 'error',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -550,7 +550,7 @@ export function App(): ReactElement {
     if (!opened) {
       setViewerProbe({
         status: 'blocked',
-        detail: localizeText('Viewer URL must point to localhost, 127.0.0.1, or ::1.', language)
+        detail: 'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
       });
     }
   }
@@ -563,14 +563,14 @@ export function App(): ReactElement {
     }
 
     const fileCandidate = file as File & { path?: string };
-    const validation = validateCaseFile(fileCandidate, language);
+    const validation = validateCaseFile(fileCandidate);
 
     setImportedCase(null);
     setCurrentRun(null);
     setReport(null);
     setReportExport({
       status: 'idle',
-      detail: localizeText('Report has not been exported.', language)
+      detail: 'Report has not been exported.'
     });
 
     if (!validation.valid) {
@@ -582,11 +582,11 @@ export function App(): ReactElement {
       return;
     }
 
-      setUploadState({
-        name: file.name,
-        status: 'importing',
-        detail: localizeText('Importing through the preload case API.', language)
-      });
+    setUploadState({
+      name: file.name,
+      status: 'importing',
+      detail: 'Importing through the preload case API.'
+    });
 
     try {
       const manifest = await api.cases.import(createCaseImportRequest(fileCandidate));
@@ -594,15 +594,13 @@ export function App(): ReactElement {
       setUploadState({
         name: manifest.name,
         status: manifest.status === 'imported' ? 'accepted' : 'rejected',
-        detail: manifest.validationMessages[0]
-          ? localizeText(manifest.validationMessages[0], language)
-          : localizeText(`${manifest.format.toUpperCase()} case imported.`, language)
+        detail: manifest.validationMessages[0] ?? `${manifest.format.toUpperCase()} case imported.`
       });
     } catch (error) {
       setUploadState({
         name: file.name,
         status: 'rejected',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -618,8 +616,8 @@ export function App(): ReactElement {
       return createReportPlaceholder({
         run,
         ...context,
-        error: error ?? getErrorMessage(reportError, language)
-      }, language);
+        error: error ?? getErrorMessage(reportError)
+      }, 'en');
     }
   }
 
@@ -673,10 +671,10 @@ export function App(): ReactElement {
       status: 'busy',
       detail: 'Sending Agent instruction and starting the local run.'
     });
-      setReportExport({
-        status: 'idle',
-        detail: localizeText('Report has not been exported.', language)
-      });
+    setReportExport({
+      status: 'idle',
+      detail: 'Report has not been exported.'
+    });
 
     try {
       const session = agentSession ?? (await api.agent.createSession());
@@ -715,7 +713,7 @@ export function App(): ReactElement {
     } catch (error) {
       setRunAction({
         status: 'error',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -743,7 +741,7 @@ export function App(): ReactElement {
     } catch (error) {
       setRunAction({
         status: 'error',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -774,7 +772,7 @@ export function App(): ReactElement {
     } catch (error) {
       setReportExport({
         status: 'error',
-        detail: getErrorMessage(error, language)
+        detail: getErrorMessage(error)
       });
     }
   }
@@ -905,7 +903,7 @@ export function App(): ReactElement {
               value={viewerUrl}
               onChange={(event) => {
                 setViewerUrl(event.target.value);
-                setViewerProbe(createInitialViewerProbeState(language));
+                setViewerProbe(createInitialViewerProbeState());
               }}
               aria-describedby="viewer-url-message"
               aria-invalid={!canOpenViewer}
@@ -1018,15 +1016,10 @@ export function App(): ReactElement {
             </button>
             <ul className="blocker-list compact">
               {(readiness.canStart
-                ? [
-                    localizeText(
-                      `Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`,
-                      language
-                    )
-                  ]
+                ? [`Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`]
                 : readiness.reasons
               ).map((reason) => (
-                <li key={reason}>{reason}</li>
+                <li key={reason}>{localizeText(reason, language)}</li>
               ))}
             </ul>
           </article>

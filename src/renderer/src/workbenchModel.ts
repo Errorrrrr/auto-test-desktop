@@ -50,23 +50,23 @@ export type FileCandidate = {
   path?: string;
 };
 
-export function createInitialUploadState(language: Language = DEFAULT_LANGUAGE): UploadState {
+export function createInitialUploadState(): UploadState {
   return {
     name: '',
     status: 'idle',
-    detail: localizeText(`Supported formats: .yaml, .yml. Maximum size: ${MAX_UPLOAD_SIZE_MB} MB.`, language)
+    detail: `Supported formats: .yaml, .yml. Maximum size: ${MAX_UPLOAD_SIZE_MB} MB.`
   };
 }
 
-export function createInitialViewerProbeState(language: Language = DEFAULT_LANGUAGE): ViewerProbeState {
+export function createInitialViewerProbeState(): ViewerProbeState {
   return {
     status: 'unchecked',
-    detail: localizeText('Local viewer reachability has not been checked in this session.', language)
+    detail: 'Local viewer reachability has not been checked in this session.'
   };
 }
 
-export const INITIAL_UPLOAD_STATE: UploadState = createInitialUploadState('en');
-export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerProbeState('en');
+export const INITIAL_UPLOAD_STATE: UploadState = createInitialUploadState();
+export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerProbeState();
 
 const EXECUTABLE_PLATFORMS = new Set(['android', 'ios']);
 
@@ -103,30 +103,30 @@ export function getRunReadiness(input: {
   selectedDeviceId: string;
   importedCase: TestCaseManifest | null;
   prompt: string;
-}, language: Language = DEFAULT_LANGUAGE): RunReadiness {
+}): RunReadiness {
   const selectedDevice = getSelectedDevice(input.devices, input.selectedDeviceId);
   const reasons: string[] = [];
 
   if (!input.environment) {
-    reasons.push(localizeText('Runtime status is still loading.', language));
+    reasons.push('Runtime status is still loading.');
   }
 
   if (!selectedDevice) {
-    reasons.push(localizeText('Select a connected Android or iOS device.', language));
+    reasons.push('Select a connected Android or iOS device.');
   } else if (!isExecutableDevice(selectedDevice)) {
-    reasons.push(localizeText('Selected device is not connected for execution.', language));
+    reasons.push('Selected device is not connected for execution.');
   }
 
   if (!input.importedCase || input.importedCase.status !== 'imported') {
-    reasons.push(localizeText('Import a valid Maestro test case.', language));
+    reasons.push('Import a valid Maestro test case.');
   }
 
   if (!input.prompt.trim()) {
-    reasons.push(localizeText('Enter an Agent instruction.', language));
+    reasons.push('Enter an Agent instruction.');
   }
 
   if (input.environment && !input.environment.canStartRun) {
-    reasons.push(...input.environment.blockers.map((blocker) => localizeText(blocker, language)));
+    reasons.push(...input.environment.blockers);
   }
 
   const uniqueReasons = uniqueMessages(reasons);
@@ -138,25 +138,22 @@ export function getRunReadiness(input: {
   };
 }
 
-export function validateViewerUrl(value: string, language: Language = DEFAULT_LANGUAGE): ViewerProbeState | null {
+export function validateViewerUrl(value: string): ViewerProbeState | null {
   if (isAllowedLocalViewerUrl(value)) {
     return null;
   }
 
   return {
     status: 'blocked',
-    detail: localizeText('Viewer URL must point to localhost, 127.0.0.1, or ::1.', language)
+    detail: 'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
   };
 }
 
-export function mapViewerProbeResult(
-  result: ViewerProbeResult,
-  language: Language = DEFAULT_LANGUAGE
-): ViewerProbeState {
+export function mapViewerProbeResult(result: ViewerProbeResult): ViewerProbeState {
   if (!result.allowed) {
     return {
       status: 'blocked',
-      detail: localizeText(result.detail, language)
+      detail: result.detail
     };
   }
 
@@ -168,32 +165,29 @@ export function mapViewerProbeResult(
 
   return {
     status: reachableToStatus[result.reachable],
-    detail: localizeText(result.detail, language)
+    detail: result.detail
   };
 }
 
-export function validateCaseFile(
-  file: FileCandidate,
-  language: Language = DEFAULT_LANGUAGE
-): { valid: true } | { valid: false; detail: string } {
+export function validateCaseFile(file: FileCandidate): { valid: true } | { valid: false; detail: string } {
   if (!/\.ya?ml$/i.test(file.name)) {
     return {
       valid: false,
-      detail: localizeText('Supported formats: .yaml, .yml.', language)
+      detail: 'Supported formats: .yaml, .yml.'
     };
   }
 
   if (file.size <= 0) {
     return {
       valid: false,
-      detail: localizeText('The selected file is empty.', language)
+      detail: 'The selected file is empty.'
     };
   }
 
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
     return {
       valid: false,
-      detail: localizeText(`File is larger than ${MAX_UPLOAD_SIZE_MB} MB.`, language)
+      detail: `File is larger than ${MAX_UPLOAD_SIZE_MB} MB.`
     };
   }
 
@@ -207,20 +201,20 @@ export function createCaseImportRequest(file: FileCandidate): TestCaseImportRequ
   };
 }
 
-export function getErrorMessage(error: unknown, language: Language = DEFAULT_LANGUAGE): string {
+export function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
-    return localizeText(error.message, language);
+    return error.message;
   }
 
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const message = (error as { message?: unknown }).message;
 
     if (typeof message === 'string' && message) {
-      return localizeText(message, language);
+      return message;
     }
   }
 
-  return localizeText('Unexpected local runtime error.', language);
+  return 'Unexpected local runtime error.';
 }
 
 export function formatDateTime(value: string, language: Language = DEFAULT_LANGUAGE): string {
@@ -293,7 +287,7 @@ export function createReportPlaceholder(input: {
   device?: DeviceInfo;
   testCase?: TestCaseManifest;
   error?: string;
-}, language: Language = DEFAULT_LANGUAGE): TestReport {
+}, language: Language = 'en'): TestReport {
   const { run, device, testCase, error } = input;
   const copy = COPY[language];
   const failureReason = redactReportText(run.failureReason);
