@@ -11,7 +11,7 @@ import type {
   MaestroRunFlowResult
 } from '../adapters/maestro/MaestroProvider';
 import { AppDataStorage } from '../storage/AppDataStorage';
-import type { DeviceInfo, ServiceHealth, TestCaseManifest } from '../../shared/types';
+import type { DeviceInfo, DeviceStartResult, ServiceHealth, TestCaseManifest } from '../../shared/types';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { ReportService } from './ReportService';
@@ -73,6 +73,15 @@ class SucceedingMaestroProvider implements MaestroProvider {
 
   async listDevices(): Promise<DeviceInfo[]> {
     return [connectedDevice];
+  }
+
+  async startDevice(): Promise<DeviceStartResult> {
+    return {
+      deviceId: connectedDevice.id,
+      device: connectedDevice,
+      status: 'already_running',
+      detail: `${connectedDevice.name} is already connected.`
+    };
   }
 
   async runFlow(_request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {

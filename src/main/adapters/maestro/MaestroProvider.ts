@@ -1,4 +1,10 @@
-import type { DeviceInfo, ServiceHealth, TestRunStatus } from '../../../shared/types';
+import type {
+  DeviceInfo,
+  DeviceStartRequest,
+  DeviceStartResult,
+  ServiceHealth,
+  TestRunStatus
+} from '../../../shared/types';
 
 export interface MaestroRunFlowRequest {
   flowPath: string;
@@ -17,6 +23,7 @@ export interface MaestroRunFlowResult {
 export interface MaestroProvider {
   health(): Promise<ServiceHealth>;
   listDevices(): Promise<DeviceInfo[]>;
+  startDevice(request: DeviceStartRequest): Promise<DeviceStartResult>;
   runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult>;
 }
 
@@ -42,6 +49,34 @@ export class StaticMaestroProvider implements MaestroProvider {
 
   async listDevices(): Promise<DeviceInfo[]> {
     return this.devices;
+  }
+
+  async startDevice(request: DeviceStartRequest): Promise<DeviceStartResult> {
+    const device = this.devices.find((candidate) => candidate.id === request.deviceId);
+
+    if (!device) {
+      return {
+        deviceId: request.deviceId,
+        status: 'failed',
+        detail: `Device "${request.deviceId}" was not found.`
+      };
+    }
+
+    if (device.connected) {
+      return {
+        deviceId: request.deviceId,
+        device,
+        status: 'already_running',
+        detail: `${device.name} is already connected.`
+      };
+    }
+
+    return {
+      deviceId: request.deviceId,
+      device,
+      status: 'not_startable',
+      detail: `${device.name} cannot be started by the static provider.`
+    };
   }
 
   async runFlow(): Promise<MaestroRunFlowResult> {

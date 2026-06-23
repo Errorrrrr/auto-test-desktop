@@ -11,7 +11,13 @@ import type {
   MaestroRunFlowResult
 } from '../adapters/maestro/MaestroProvider';
 import { AppDataStorage } from '../storage/AppDataStorage';
-import type { DeviceInfo, ServiceHealth, TestCaseManifest, TestRunStatus } from '../../shared/types';
+import type {
+  DeviceInfo,
+  DeviceStartResult,
+  ServiceHealth,
+  TestCaseManifest,
+  TestRunStatus
+} from '../../shared/types';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { TestRunService } from './TestRunService';
@@ -107,6 +113,17 @@ class MockMaestroProvider implements MaestroProvider {
 
   async listDevices(): Promise<DeviceInfo[]> {
     return this.devices;
+  }
+
+  async startDevice(): Promise<DeviceStartResult> {
+    const device = this.devices[0];
+
+    return {
+      deviceId: device?.id ?? 'unknown',
+      device,
+      status: device?.connected ? 'already_running' : 'not_startable',
+      detail: device?.connected ? `${device.name} is already connected.` : 'Device is not startable.'
+    };
   }
 
   async runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {

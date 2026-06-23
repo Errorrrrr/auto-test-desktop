@@ -131,8 +131,21 @@ describe('workbench panels', () => {
         name: 'Pixel 8 API 35',
         platform: 'android',
         type: 'emulator',
-        connected: false
-      },
+        connected: false,
+        launchable: true,
+        source: 'android-avd',
+        state: 'Shutdown'
+      } as DeviceInfo,
+      {
+        id: 'emulator-5554',
+        name: 'Offline adb emulator',
+        platform: 'android',
+        type: 'emulator',
+        connected: false,
+        launchable: false,
+        source: 'adb',
+        state: 'offline'
+      } as DeviceInfo,
       {
         id: 'ios-physical-1',
         name: 'Jane iPhone',
@@ -160,6 +173,7 @@ describe('workbench panels', () => {
     expect(html).toContain('Check devices');
     expect(html).toContain('Pixel 8 API 35');
     expect(html).toContain('android / emulator');
+    expect(html).toContain('Offline adb emulator');
     expect(html).toContain('Start');
     expect(html).toContain('Jane iPhone');
     expect(html).toContain('ios / physical');

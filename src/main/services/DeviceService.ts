@@ -1,9 +1,10 @@
-import type { DeviceInfo, ServiceHealth } from '../../shared/types';
+import type { DeviceInfo, DeviceStartResult, ServiceHealth } from '../../shared/types';
 import type {
   MaestroProvider,
   MaestroRunFlowRequest,
   MaestroRunFlowResult
 } from '../adapters/maestro/MaestroProvider';
+import { requireStringField } from './validation';
 
 type DeviceServiceOptions = {
   provider: MaestroProvider;
@@ -37,6 +38,12 @@ export class DeviceService {
 
       return matchesDevice && executablePlatform && device.connected;
     });
+  }
+
+  async startDevice(payload: unknown): Promise<DeviceStartResult> {
+    const deviceId = requireStringField(payload, 'deviceId');
+
+    return this.provider.startDevice({ deviceId });
   }
 
   async runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {

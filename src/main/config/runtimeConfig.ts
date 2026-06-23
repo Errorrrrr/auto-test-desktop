@@ -3,24 +3,30 @@ import { join } from 'node:path';
 export type MaestroProviderMode = 'cli' | 'mcp' | 'disabled';
 
 export interface RuntimeEnv {
+  ADB_PATH?: string;
   APP_AUTO_TEST_DATA_DIR?: string;
   AGENT_COMMAND?: string;
   AGENT_PROVIDER?: string;
+  ANDROID_EMULATOR_PATH?: string;
   MAESTRO_CLI_PATH?: string;
   MAESTRO_PROVIDER?: string;
   MAESTRO_VIEWER_URL?: string;
   MAX_UPLOAD_SIZE_MB?: string;
   RUN_TIMEOUT_MS?: string;
+  XCRUN_PATH?: string;
 }
 
 export interface RuntimeConfig {
+  adbPath: string;
   agentCommand?: string;
   agentProvider: string;
+  androidEmulatorPath: string;
   dataRoot: string;
   maestroCliPath: string;
   maestroProvider: MaestroProviderMode;
   maxUploadSizeBytes: number;
   runTimeoutMs: number;
+  xcrunPath: string;
 }
 
 const DEFAULT_MAX_UPLOAD_SIZE_MB = 25;
@@ -54,12 +60,15 @@ export function createRuntimeConfig(
   const maxUploadSizeMb = parsePositiveInteger(env.MAX_UPLOAD_SIZE_MB, DEFAULT_MAX_UPLOAD_SIZE_MB);
 
   return {
+    adbPath: env.ADB_PATH?.trim() || 'adb',
     agentCommand: env.AGENT_COMMAND?.trim() || undefined,
     agentProvider: env.AGENT_PROVIDER?.trim() || 'manual-ready',
+    androidEmulatorPath: env.ANDROID_EMULATOR_PATH?.trim() || 'emulator',
     dataRoot,
     maestroCliPath: env.MAESTRO_CLI_PATH?.trim() || 'maestro',
     maestroProvider: parseMaestroProvider(env.MAESTRO_PROVIDER),
     maxUploadSizeBytes: maxUploadSizeMb * 1024 * 1024,
-    runTimeoutMs: parsePositiveInteger(env.RUN_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS)
+    runTimeoutMs: parsePositiveInteger(env.RUN_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS),
+    xcrunPath: env.XCRUN_PATH?.trim() || 'xcrun'
   };
 }

@@ -1,5 +1,6 @@
 import type {
   DeviceInfo,
+  DeviceStartResult,
   EnvironmentStatus,
   ReportFormat,
   ServiceStatus,
@@ -52,6 +53,12 @@ export type DeviceInspectionSummary = {
   startable: number;
 };
 
+export type DeviceStartActionState = {
+  status: AsyncStatus;
+  detail: string;
+  deviceId: string;
+};
+
 export type FileCandidate = {
   name: string;
   size: number;
@@ -92,7 +99,26 @@ export function isVirtualDevice(device: DeviceInfo): boolean {
 }
 
 export function isStartableDevice(device: DeviceInfo): boolean {
-  return isVirtualDevice(device) && !device.connected;
+  return isVirtualDevice(device) && !device.connected && device.launchable === true;
+}
+
+export function mapDeviceStartResultToAction(
+  result: DeviceStartResult,
+  fallbackDeviceName: string
+): DeviceStartActionState {
+  const statusByResult: Record<DeviceStartResult['status'], AsyncStatus> = {
+    already_running: 'success',
+    failed: 'error',
+    not_startable: 'error',
+    started: 'success',
+    starting: 'busy'
+  };
+
+  return {
+    status: statusByResult[result.status],
+    detail: result.detail || `Device ${fallbackDeviceName} start returned ${result.status}.`,
+    deviceId: result.deviceId
+  };
 }
 
 export function getExecutableDevices(devices: DeviceInfo[]): DeviceInfo[] {

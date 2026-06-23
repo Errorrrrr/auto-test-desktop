@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   DeviceInfo,
+  DeviceStartResult,
   EnvironmentStatus,
   TestCaseManifest,
   TestRun
@@ -15,6 +16,7 @@ import {
   getRunReadiness,
   isStartableDevice,
   isVirtualDevice,
+  mapDeviceStartResultToAction,
   mapViewerProbeResult,
   validateCaseFile,
   validateViewerUrl
@@ -36,6 +38,24 @@ const disconnectedDevice: DeviceInfo = {
   type: 'simulator',
   connected: false
 };
+
+const launchableSimulator = {
+  ...disconnectedDevice,
+  launchable: true,
+  source: 'simctl',
+  state: 'Shutdown'
+} as DeviceInfo;
+
+const offlineAdbEmulator = {
+  id: 'emulator-5554',
+  name: 'Pixel offline',
+  platform: 'android',
+  type: 'emulator',
+  connected: false,
+  launchable: false,
+  source: 'adb',
+  state: 'offline'
+} as DeviceInfo;
 
 const disconnectedPhysicalDevice: DeviceInfo = {
   id: 'ios-physical-1',
@@ -128,7 +148,7 @@ describe('workbench device inspection', () => {
   it('counts Android and iOS physical plus virtual devices separately', () => {
     const summary = getDeviceInspectionSummary([
       connectedDevice,
-      disconnectedDevice,
+      launchableSimulator,
       disconnectedPhysicalDevice,
       {
         id: 'web-1',
@@ -148,11 +168,58 @@ describe('workbench device inspection', () => {
 
   it('allows only disconnected Android emulators and iOS simulators to show start actions', () => {
     expect(isVirtualDevice(connectedDevice)).toBe(true);
-    expect(isVirtualDevice(disconnectedDevice)).toBe(true);
+    expect(isVirtualDevice(launchableSimulator)).toBe(true);
     expect(isVirtualDevice(disconnectedPhysicalDevice)).toBe(false);
-    expect(isStartableDevice(disconnectedDevice)).toBe(true);
+    expect(isStartableDevice(launchableSimulator)).toBe(true);
     expect(isStartableDevice(connectedDevice)).toBe(false);
+    expect(isStartableDevice(disconnectedDevice)).toBe(false);
+    expect(isStartableDevice(offlineAdbEmulator)).toBe(false);
     expect(isStartableDevice(disconnectedPhysicalDevice)).toBe(false);
+  });
+
+  it('maps backend device start statuses into renderer action states', () => {
+    expect(
+      mapDeviceStartResultToAction(
+        {
+          deviceId: 'android-avd:Pixel_8',
+          status: 'starting',
+          detail: 'Android emulator Pixel_8 is starting.'
+        } as DeviceStartResult,
+        'Pixel 8'
+      )
+    ).toEqual({
+      status: 'busy',
+      detail: 'Android emulator Pixel_8 is starting.',
+      deviceId: 'android-avd:Pixel_8'
+    });
+
+    expect(
+      mapDeviceStartResultToAction(
+        {
+          deviceId: 'ios-simulator-1',
+          status: 'already_running',
+          detail: 'iPhone 16 is already running.'
+        } as DeviceStartResult,
+        'iPhone 16'
+      )
+    ).toMatchObject({
+      status: 'success',
+      detail: 'iPhone 16 is already running.'
+    });
+
+    expect(
+      mapDeviceStartResultToAction(
+        {
+          deviceId: 'emulator-5554',
+          status: 'not_startable',
+          detail: 'Physical and adb devices cannot be launched.'
+        } as DeviceStartResult,
+        'Pixel offline'
+      )
+    ).toMatchObject({
+      status: 'error',
+      detail: 'Physical and adb devices cannot be launched.'
+    });
   });
 });
 

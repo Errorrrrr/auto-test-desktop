@@ -59,6 +59,7 @@ import {
   getStatusTone,
   isExecutableDevice,
   isStartableDevice,
+  mapDeviceStartResultToAction,
   mapViewerProbeResult,
   normalizeViewerInput,
   validateCaseFile,
@@ -107,7 +108,12 @@ function createBrowserFallbackApi(): AppAutoTestApi {
       }
     },
     devices: {
-      list: async () => []
+      list: async () => [],
+      start: async (deviceId: string) => ({
+        deviceId,
+        status: 'failed',
+        detail: 'Device launch is only available in the Electron desktop runtime.'
+      })
     },
     viewer: {
       getConfig: async () => getViewerConfig({}),
@@ -629,30 +635,15 @@ export function App(): ReactElement {
       deviceId: device.id
     });
 
-    const startDevice = api.devices.start;
-
-    if (!startDevice) {
-      setDeviceAction({
-        status: 'error',
-        detail: 'Device start is waiting for Electron main IPC.',
-        deviceId: device.id
-      });
-      return;
-    }
-
     try {
-      const result = await startDevice(device.id);
-      const nextDevices = result.devices ?? (result.device ? devices.map((currentDevice) =>
+      const result = await api.devices.start(device.id);
+      const nextDevices = result.device ? devices.map((currentDevice) =>
         currentDevice.id === result.device?.id ? result.device : currentDevice
-      ) : await api.devices.list());
+      ) : await api.devices.list();
 
       setDevices(nextDevices);
       setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
-      setDeviceAction({
-        status: result.status === 'started' || result.status === 'already_connected' ? 'success' : 'error',
-        detail: result.detail || `Device ${device.name} start returned ${result.status}.`,
-        deviceId: device.id
-      });
+      setDeviceAction(mapDeviceStartResultToAction(result, device.name));
     } catch (error) {
       setDeviceAction({
         status: 'error',

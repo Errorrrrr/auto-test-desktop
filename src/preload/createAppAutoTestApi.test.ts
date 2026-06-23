@@ -33,6 +33,7 @@ describe('preload appAutoTest API', () => {
     });
 
     await api.viewer.probe('http://127.0.0.1:10000/');
+    await api.devices.start('ios-shutdown');
     await api.cases.import({ sourcePath: '/tmp/smoke.yaml' });
     await api.runs.getStatus('run-1');
     await api.agent.sendMessage({ sessionId: 'session-1', content: 'Run smoke flow' });
@@ -41,6 +42,10 @@ describe('preload appAutoTest API', () => {
       {
         channel: IPC_CHANNELS.viewer.probe,
         payload: { url: 'http://127.0.0.1:10000/' }
+      },
+      {
+        channel: IPC_CHANNELS.devices.start,
+        payload: { deviceId: 'ios-shutdown' }
       },
       {
         channel: IPC_CHANNELS.cases.import,

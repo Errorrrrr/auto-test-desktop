@@ -26,18 +26,25 @@ export interface DeviceInfo {
   platform: DevicePlatform;
   type: DeviceType;
   connected: boolean;
+  launchable?: boolean;
+  source?: 'adb' | 'android-avd' | 'simctl' | 'xctrace';
+  state?: string;
+}
+
+export interface DeviceStartRequest {
+  deviceId: string;
 }
 
 export type DeviceStartStatus =
+  | 'already_running'
+  | 'failed'
+  | 'not_startable'
   | 'started'
-  | 'already_connected'
-  | 'unsupported'
-  | 'unavailable'
-  | 'failed';
+  | 'starting';
 
 export interface DeviceStartResult {
+  deviceId: string;
   device?: DeviceInfo;
-  devices?: DeviceInfo[];
   status: DeviceStartStatus;
   detail: string;
 }
@@ -209,7 +216,7 @@ export interface AppAutoTestApi {
   };
   devices: {
     list: () => Promise<DeviceInfo[]>;
-    start?: (deviceId: string) => Promise<DeviceStartResult>;
+    start: (deviceId: string) => Promise<DeviceStartResult>;
   };
   viewer: {
     getConfig: () => Promise<ViewerConfig>;

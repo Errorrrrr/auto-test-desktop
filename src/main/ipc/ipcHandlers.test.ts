@@ -91,5 +91,11 @@ describe('main process IPC handlers', () => {
       canStartRun: false
     });
     await expect(invokeIpcHandler(handlers, IPC_CHANNELS.devices.list)).resolves.toEqual([]);
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.devices.start, { deviceId: 'ios-shutdown' })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      detail: expect.stringContaining('ios-shutdown')
+    });
   });
 });
