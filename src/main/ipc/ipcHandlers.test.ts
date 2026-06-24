@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { IPC_CHANNELS } from '../../shared/ipcChannels';
 import type { AgentProvider } from '../adapters/agent/AgentProvider';
@@ -32,9 +36,20 @@ const testAgentProvider: AgentProvider = {
   }
 };
 
-function createTestServices() {
+const tempRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempRoots.splice(0).map((rootDir) => rm(rootDir, { force: true, recursive: true })));
+});
+
+async function createTestServices() {
+  const rootDir = await mkdtemp(join(tmpdir(), 'app-auto-test-ipc-'));
+
+  tempRoots.push(rootDir);
+
   return createDefaultServices({
     agentProvider: testAgentProvider,
+    dataRoot: join(rootDir, 'data'),
     env: {},
     maestroProvider: new StaticMaestroProvider([], {
       status: 'disconnected',
@@ -46,7 +61,7 @@ function createTestServices() {
 
 describe('main process IPC handlers', () => {
   it('rejects channels outside the explicit whitelist', async () => {
-    const handlers = createIpcHandlers(createTestServices());
+    const handlers = createIpcHandlers(await createTestServices());
 
     await expect(invokeIpcHandler(handlers, 'shell:exec', {})).rejects.toMatchObject({
       code: 'IPC_CHANNEL_NOT_ALLOWED',
@@ -55,7 +70,7 @@ describe('main process IPC handlers', () => {
   });
 
   it('rejects non-localhost viewer URLs with an understandable error', async () => {
-    const handlers = createIpcHandlers(createTestServices());
+    const handlers = createIpcHandlers(await createTestServices());
 
     await expect(
       invokeIpcHandler(handlers, IPC_CHANNELS.viewer.probe, {
@@ -68,7 +83,7 @@ describe('main process IPC handlers', () => {
   });
 
   it('rejects missing required arguments before touching local capabilities', async () => {
-    const handlers = createIpcHandlers(createTestServices());
+    const handlers = createIpcHandlers(await createTestServices());
 
     await expect(
       invokeIpcHandler(handlers, IPC_CHANNELS.cases.import, {})
@@ -79,7 +94,7 @@ describe('main process IPC handlers', () => {
   });
 
   it('exposes environment and device state through service-backed handlers', async () => {
-    const handlers = createIpcHandlers(createTestServices());
+    const handlers = createIpcHandlers(await createTestServices());
 
     await expect(invokeIpcHandler(handlers, IPC_CHANNELS.env.getStatus)).resolves.toMatchObject({
       maestro: {
@@ -96,6 +111,62 @@ describe('main process IPC handlers', () => {
     ).resolves.toMatchObject({
       status: 'failed',
       detail: expect.stringContaining('ios-shutdown')
+    });
+  });
+
+  it('exposes task workspace contract handlers while preserving the legacy IPC surface', async () => {
+    const handlers = createIpcHandlers(await createTestServices());
+    const task = await invokeIpcHandler(handlers, IPC_CHANNELS.tasks.create, {
+      name: 'Smoke task',
+      description: 'Verify launch'
+    });
+
+    expect(Object.keys(handlers).sort()).toEqual(
+      [
+        IPC_CHANNELS.agent.createSession,
+        IPC_CHANNELS.agent.sendMessage,
+        IPC_CHANNELS.cases.import,
+        IPC_CHANNELS.devices.list,
+        IPC_CHANNELS.devices.start,
+        IPC_CHANNELS.env.getStatus,
+        IPC_CHANNELS.reports.export,
+        IPC_CHANNELS.reports.get,
+        IPC_CHANNELS.runs.cancel,
+        IPC_CHANNELS.runs.getStatus,
+        IPC_CHANNELS.runs.start,
+        IPC_CHANNELS.tasks.cancel,
+        IPC_CHANNELS.tasks.create,
+        IPC_CHANNELS.tasks.exportReport,
+        IPC_CHANNELS.tasks.get,
+        IPC_CHANNELS.tasks.getReport,
+        IPC_CHANNELS.tasks.importCase,
+        IPC_CHANNELS.tasks.list,
+        IPC_CHANNELS.tasks.start,
+        IPC_CHANNELS.tasks.updateInput,
+        IPC_CHANNELS.viewer.getConfig,
+        IPC_CHANNELS.viewer.probe
+      ].sort()
+    );
+    expect(task).toMatchObject({
+      id: expect.stringMatching(/^task-/),
+      name: 'Smoke task',
+      status: 'draft',
+      input: {
+        mode: 'empty'
+      }
+    });
+    await expect(invokeIpcHandler(handlers, IPC_CHANNELS.tasks.list)).resolves.toEqual([
+      expect.objectContaining({
+        name: 'Smoke task'
+      })
+    ]);
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.tasks.start, {
+        taskId: (task as { id: string }).id,
+        deviceId: 'android-connected'
+      })
+    ).rejects.toMatchObject({
+      code: 'TASK_INPUT_REQUIRED'
     });
   });
 });

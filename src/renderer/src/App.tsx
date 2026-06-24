@@ -25,6 +25,8 @@ import type {
   DeviceInfo,
   EnvironmentStatus,
   ServiceHealth,
+  TaskReport,
+  TestTask,
   TestCaseManifest,
   TestReport,
   TestRun,
@@ -88,6 +90,60 @@ const RUN_STATUS_MAX_POLLS = 120;
 
 function isTerminalRunStatus(status: TestRun['status']): boolean {
   return TERMINAL_RUN_STATUSES.has(status);
+}
+
+function createBrowserFallbackTask(options: {
+  id?: string;
+  name?: string;
+  description?: string;
+  prompt?: string;
+  status?: TestTask['status'];
+  failureReason?: string;
+} = {}): TestTask {
+  const now = new Date().toISOString();
+  const prompt = options.prompt?.trim();
+
+  return {
+    id: options.id ?? `browser-task-${Date.now()}`,
+    name: options.name ?? 'Browser fallback task',
+    ...(options.description ? { description: options.description } : {}),
+    status: options.status ?? (prompt ? 'ready' : 'draft'),
+    input: {
+      mode: prompt ? 'natural_language' : 'empty',
+      ...(prompt
+        ? {
+            naturalLanguage: {
+              prompt,
+              updatedAt: now
+            }
+          }
+        : {}),
+      blockers: prompt ? [] : ['Task input is required before execution.']
+    },
+    workspacePath: 'browser-fallback/tasks',
+    createdAt: now,
+    updatedAt: now,
+    ...(options.failureReason ? { failureReason: options.failureReason } : {})
+  };
+}
+
+function createBrowserFallbackTaskReport(taskId: string, summary: string): TaskReport {
+  const now = new Date().toISOString();
+
+  return {
+    taskId,
+    title: 'Task report unavailable',
+    status: 'blocked',
+    inputMode: 'empty',
+    inputSummary: 'Browser fallback cannot read task workspace state.',
+    targetDevice: 'browser-device',
+    startedAt: now,
+    endedAt: now,
+    conclusion: 'Blocked before execution',
+    failureReason: summary,
+    artifacts: [],
+    markdown: `# Task report unavailable\n\n${summary}`
+  };
 }
 
 function createBrowserFallbackApi(): AppAutoTestApi {
@@ -209,6 +265,51 @@ function createBrowserFallbackApi(): AppAutoTestApi {
           markdown: `# ${copy.report.fallbackTitle}\n\n${summary}`
         };
       }
+    },
+    tasks: {
+      create: async (request) =>
+        createBrowserFallbackTask({
+          name: request.name,
+          description: request.description
+        }),
+      list: async () => [],
+      get: async (taskId) =>
+        createBrowserFallbackTask({
+          id: taskId
+        }),
+      updateInput: async (request) =>
+        createBrowserFallbackTask({
+          id: request.taskId,
+          prompt: request.prompt
+        }),
+      importCase: async (request) =>
+        createBrowserFallbackTask({
+          id: request.taskId,
+          status: 'blocked',
+          failureReason: 'Task-scoped imports require the Electron main process.'
+        }),
+      start: async (request) =>
+        createBrowserFallbackTask({
+          id: request.taskId,
+          status: 'blocked',
+          failureReason: 'Task execution requires the Electron main process.'
+        }),
+      cancel: async (taskId) =>
+        createBrowserFallbackTask({
+          id: taskId,
+          status: 'cancelled',
+          failureReason: 'Browser fallback cannot cancel local task execution.'
+        }),
+      getReport: async (taskId) =>
+        createBrowserFallbackTaskReport(
+          taskId,
+          'Task report generation requires the Electron main process.'
+        ),
+      exportReport: async (request) =>
+        createBrowserFallbackTaskReport(
+          request.taskId,
+          `${getReportFormatLabel(request.format, 'en')} task report export requires the Electron main process.`
+        )
     },
     agent: {
       createSession: async () => ({

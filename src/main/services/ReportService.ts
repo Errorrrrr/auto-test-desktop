@@ -1,7 +1,15 @@
 import { writeFile } from 'node:fs/promises';
 
 import { redactReportText } from '../../shared/redaction';
-import type { TestReport, TestRun, TestRunStatus } from '../../shared/types';
+import type {
+  TaskReport,
+  TaskReportArtifact,
+  TestReport,
+  TestRun,
+  TestRunStatus,
+  TestTask,
+  TestTaskStatus
+} from '../../shared/types';
 import type { AppDataStorage } from '../storage/AppDataStorage';
 import { AppError } from './AppError';
 import type { TestRunService } from './TestRunService';
@@ -14,6 +22,18 @@ const STATUS_CONCLUSION: Record<TestRunStatus, string> = {
   cancelled: 'Cancelled by user',
   failed: 'Failed',
   queued: 'Queued',
+  running: 'Running',
+  succeeded: 'Succeeded',
+  timeout: 'Timed out'
+};
+
+const TASK_STATUS_CONCLUSION: Record<TestTaskStatus, string> = {
+  blocked: 'Blocked before execution',
+  cancelled: 'Cancelled by user',
+  draft: 'Draft',
+  failed: 'Failed',
+  queued: 'Queued',
+  ready: 'Ready',
   running: 'Running',
   succeeded: 'Succeeded',
   timeout: 'Timed out'
@@ -40,6 +60,113 @@ function formatTargetDevice(run: TestRun): string {
 
 function formatTestCase(run: TestRun): string {
   return run.caseName ? `${run.caseName} (${run.caseId})` : run.caseId;
+}
+
+function formatTaskTargetDevice(task: TestTask, run?: TestRun): string {
+  if (run) {
+    return formatTargetDevice(run);
+  }
+
+  if (task.deviceSnapshot) {
+    const platform = task.deviceSnapshot.platform ? `, ${task.deviceSnapshot.platform}` : '';
+    const type = task.deviceSnapshot.type ? `/${task.deviceSnapshot.type}` : '';
+
+    return `${task.deviceSnapshot.name} (${task.deviceSnapshot.id}${platform}${type})`;
+  }
+
+  return task.deviceId ? `Unknown device (${task.deviceId})` : 'Not selected';
+}
+
+function formatTaskInputSummary(task: TestTask): string {
+  const prompt = task.input.naturalLanguage?.prompt;
+  const testCase = task.input.testCase;
+
+  if (prompt && testCase) {
+    return `Uploaded test case ${testCase.name} (${testCase.caseId}) with prompt: ${prompt}`;
+  }
+
+  if (testCase) {
+    return `Uploaded test case ${testCase.name} (${testCase.caseId})`;
+  }
+
+  if (prompt) {
+    return `Natural language prompt: ${prompt}`;
+  }
+
+  return 'No task input configured.';
+}
+
+function getTaskArtifacts(task: TestTask): TaskReportArtifact[] {
+  const artifacts: TaskReportArtifact[] = [];
+
+  if (task.input.testCase?.storedPath) {
+    artifacts.push({
+      label: task.input.testCase.name,
+      path: task.input.testCase.storedPath,
+      kind: 'flow'
+    });
+  }
+
+  if (task.reportPath) {
+    artifacts.push({
+      label: 'Task report',
+      path: task.reportPath,
+      kind: 'report'
+    });
+  }
+
+  return artifacts;
+}
+
+function buildTaskMarkdown(
+  task: TestTask,
+  run: TestRun | undefined,
+  report: Omit<TaskReport, 'markdown'>
+): string {
+  const lines = [
+    `# ${report.title}`,
+    '',
+    '## Task information',
+    '',
+    `- Task: ${task.id}`,
+    ...(run ? [`- Run: ${run.id}`] : []),
+    `- Status: ${report.status}`,
+    `- Conclusion: ${report.conclusion}`,
+    `- Target device: ${report.targetDevice}`,
+    `- Started: ${report.startedAt}`,
+    `- Ended: ${report.endedAt}`,
+    `- Duration: ${formatDuration(report.startedAt, report.endedAt)}`,
+    '',
+    '## Input',
+    '',
+    `- Input mode: ${report.inputMode}`,
+    `- Summary: ${report.inputSummary}`
+  ];
+
+  if (report.failureReason) {
+    lines.push('', '## Failure reason', '', report.failureReason);
+  }
+
+  if (report.artifacts.length > 0) {
+    lines.push('', '## Artifacts', '');
+
+    for (const artifact of report.artifacts) {
+      lines.push(`- ${artifact.label} (${artifact.kind}): ${redactReportText(artifact.path)}`);
+    }
+  }
+
+  const stdout = redactReportText(run?.stdout?.trim());
+  const stderr = redactReportText(run?.stderr?.trim());
+
+  if (stdout) {
+    lines.push('', '## Stdout', '', '```text', stdout, '```');
+  }
+
+  if (stderr) {
+    lines.push('', '## Stderr', '', '```text', stderr, '```');
+  }
+
+  return `${lines.join('\n')}\n`;
 }
 
 function buildMarkdown(run: TestRun, report: Omit<TestReport, 'markdown'>): string {
@@ -136,6 +263,53 @@ export class ReportService {
     return {
       ...report,
       filePath
+    };
+  }
+
+  async generateForTask(task: TestTask, run?: TestRun): Promise<TaskReport> {
+    const status = task.status;
+    const failureReason = redactReportText(task.failureReason ?? run?.failureReason);
+    const reportWithoutMarkdown: Omit<TaskReport, 'markdown'> = {
+      taskId: task.id,
+      ...(run ? { runId: run.id } : {}),
+      title: `Task report for ${redactReportText(task.name)}`,
+      status,
+      inputMode: task.input.mode,
+      inputSummary: redactReportText(formatTaskInputSummary(task)) ?? '',
+      targetDevice: redactReportText(formatTaskTargetDevice(task, run)) ?? '',
+      startedAt: task.startedAt ?? run?.startedAt ?? task.createdAt,
+      endedAt: task.completedAt ?? run?.completedAt ?? run?.updatedAt ?? task.updatedAt,
+      conclusion: TASK_STATUS_CONCLUSION[status],
+      ...(failureReason ? { failureReason } : {}),
+      artifacts: getTaskArtifacts(task)
+    };
+
+    return {
+      ...reportWithoutMarkdown,
+      markdown: buildTaskMarkdown(task, run, reportWithoutMarkdown)
+    };
+  }
+
+  async exportTaskMarkdown(task: TestTask, run?: TestRun): Promise<TaskReport> {
+    const report = await this.generateForTask(task, run);
+    const workspace = this.storage.getTaskWorkspace(task.id);
+    const filePath = workspace.getReportPath(`${task.id}.md`);
+
+    await this.storage.ensure();
+    await workspace.ensure();
+    await writeFile(filePath, report.markdown, 'utf8');
+
+    return {
+      ...report,
+      filePath,
+      artifacts: [
+        ...report.artifacts,
+        {
+          label: 'Task report',
+          path: filePath,
+          kind: 'report'
+        }
+      ]
     };
   }
 }

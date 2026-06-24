@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 
 import type { TestCaseFormat, TestCaseManifest } from '../../shared/types';
-import type { AppDataStorage } from '../storage/AppDataStorage';
+import type { AppDataStorage, TaskWorkspaceStorage } from '../storage/AppDataStorage';
 import { AppError } from './AppError';
 import { optionalStringField, requireStringField } from './validation';
 
@@ -59,6 +59,28 @@ export class TestCaseService {
   }
 
   async importCase(request: unknown): Promise<TestCaseManifest> {
+    const manifest = await this.importCaseToDirectory(request, (id) =>
+      this.storage.getTestCaseDirectory(id)
+    );
+
+    await this.storage.getTestCaseStore().upsert(manifest);
+
+    return manifest;
+  }
+
+  async importCaseForTask(
+    request: unknown,
+    workspace: TaskWorkspaceStorage
+  ): Promise<TestCaseManifest> {
+    await workspace.ensure();
+
+    return this.importCaseToDirectory(request, (id) => workspace.resolveInside('uploads', id));
+  }
+
+  private async importCaseToDirectory(
+    request: unknown,
+    getDestinationDir: (id: string) => string
+  ): Promise<TestCaseManifest> {
     const sourcePath = requireStringField(request, 'sourcePath');
     const displayName = optionalStringField(request, 'displayName');
     const format = getSupportedFormat(sourcePath);
@@ -87,7 +109,7 @@ export class TestCaseService {
     await this.storage.ensure();
 
     const id = `case-${randomUUID()}`;
-    const destinationDir = this.storage.getTestCaseDirectory(id);
+    const destinationDir = getDestinationDir(id);
     const destinationPath = join(destinationDir, basename(sourcePath));
 
     await mkdir(destinationDir, { recursive: true });
@@ -105,8 +127,6 @@ export class TestCaseService {
       status: 'imported',
       validationMessages: []
     };
-
-    await this.storage.getTestCaseStore().upsert(manifest);
 
     return manifest;
   }

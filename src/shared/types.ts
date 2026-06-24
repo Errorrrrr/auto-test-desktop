@@ -120,6 +120,104 @@ export interface TestCaseManifest {
   validationMessages: string[];
 }
 
+export type TaskInputMode = 'empty' | 'natural_language' | 'test_case' | 'mixed';
+
+export interface NaturalLanguageInput {
+  prompt: string;
+  updatedAt: string;
+}
+
+export interface TaskCaseInput {
+  caseId: string;
+  name: string;
+  storedPath: string;
+  format: TestCaseFormat;
+  source: 'uploaded' | 'agent_generated';
+  importedAt: string;
+}
+
+export interface TaskInput {
+  mode: TaskInputMode;
+  naturalLanguage?: NaturalLanguageInput;
+  testCase?: TaskCaseInput;
+  blockers: string[];
+}
+
+export type TestTaskStatus =
+  | 'draft'
+  | 'ready'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'timeout'
+  | 'blocked';
+
+export interface TestTask {
+  id: string;
+  name: string;
+  description?: string;
+  status: TestTaskStatus;
+  input: TaskInput;
+  deviceId?: string;
+  deviceSnapshot?: DeviceInfo;
+  latestRunId?: string;
+  reportPath?: string;
+  workspacePath: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  failureReason?: string;
+}
+
+export interface TaskCreateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface TaskIdRequest {
+  taskId: string;
+}
+
+export interface TaskUpdateInputRequest extends TaskIdRequest {
+  prompt?: string;
+}
+
+export interface TaskImportCaseRequest extends TaskIdRequest, TestCaseImportRequest {}
+
+export interface TaskStartRequest extends TaskIdRequest {
+  deviceId: string;
+}
+
+export interface TaskReportExportRequest extends TaskIdRequest {
+  format: ReportFormat;
+}
+
+export interface TaskReportArtifact {
+  label: string;
+  path: string;
+  kind: 'log' | 'report' | 'transcript' | 'flow';
+}
+
+export interface TaskReport {
+  taskId: string;
+  runId?: string;
+  title: string;
+  status: TestTaskStatus;
+  inputMode: TaskInputMode;
+  inputSummary: string;
+  targetDevice: string;
+  startedAt: string;
+  endedAt: string;
+  conclusion: string;
+  failureReason?: string;
+  artifacts: TaskReportArtifact[];
+  markdown: string;
+  filePath?: string;
+}
+
 export type AgentSessionStatus = 'available' | 'unavailable';
 export type AgentMessageRole = 'user' | 'assistant' | 'system';
 
@@ -163,6 +261,7 @@ export interface TestRunStatusRequest {
 
 export interface TestRun {
   id: string;
+  taskId?: string;
   caseId: string;
   caseName?: string;
   casePath?: string;
@@ -233,6 +332,17 @@ export interface AppAutoTestApi {
   reports: {
     get: (runId: string) => Promise<TestReport>;
     export: (request: ReportExportRequest) => Promise<TestReport>;
+  };
+  tasks: {
+    create: (request: TaskCreateRequest) => Promise<TestTask>;
+    list: () => Promise<TestTask[]>;
+    get: (taskId: string) => Promise<TestTask>;
+    updateInput: (request: TaskUpdateInputRequest) => Promise<TestTask>;
+    importCase: (request: TaskImportCaseRequest) => Promise<TestTask>;
+    start: (request: TaskStartRequest) => Promise<TestTask>;
+    cancel: (taskId: string) => Promise<TestTask>;
+    getReport: (taskId: string) => Promise<TaskReport>;
+    exportReport: (request: TaskReportExportRequest) => Promise<TaskReport>;
   };
   agent: {
     createSession: () => Promise<AgentSession>;

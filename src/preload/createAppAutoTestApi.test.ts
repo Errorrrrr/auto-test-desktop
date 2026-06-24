@@ -15,6 +15,7 @@ describe('preload appAutoTest API', () => {
       'env',
       'reports',
       'runs',
+      'tasks',
       'viewer'
     ]);
     expect('invoke' in api).toBe(false);
@@ -36,6 +37,21 @@ describe('preload appAutoTest API', () => {
     await api.devices.start('ios-shutdown');
     await api.cases.import({ sourcePath: '/tmp/smoke.yaml' });
     await api.runs.getStatus('run-1');
+    await api.tasks.create({ name: 'Smoke task', description: 'Verify launch' });
+    await api.tasks.list();
+    await api.tasks.get('task-1');
+    await api.tasks.updateInput({
+      taskId: 'task-1',
+      prompt: 'Run launch smoke'
+    });
+    await api.tasks.importCase({
+      taskId: 'task-1',
+      sourcePath: '/tmp/smoke.yaml'
+    });
+    await api.tasks.start({ taskId: 'task-1', deviceId: 'android-1' });
+    await api.tasks.cancel('task-1');
+    await api.tasks.getReport('task-1');
+    await api.tasks.exportReport({ taskId: 'task-1', format: 'markdown' });
     await api.agent.sendMessage({ sessionId: 'session-1', content: 'Run smoke flow' });
 
     expect(calls).toEqual([
@@ -54,6 +70,48 @@ describe('preload appAutoTest API', () => {
       {
         channel: IPC_CHANNELS.runs.getStatus,
         payload: { runId: 'run-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.create,
+        payload: { name: 'Smoke task', description: 'Verify launch' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.list,
+        payload: undefined
+      },
+      {
+        channel: IPC_CHANNELS.tasks.get,
+        payload: { taskId: 'task-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.updateInput,
+        payload: {
+          taskId: 'task-1',
+          prompt: 'Run launch smoke'
+        }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.importCase,
+        payload: {
+          taskId: 'task-1',
+          sourcePath: '/tmp/smoke.yaml'
+        }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.start,
+        payload: { taskId: 'task-1', deviceId: 'android-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.cancel,
+        payload: { taskId: 'task-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.getReport,
+        payload: { taskId: 'task-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.exportReport,
+        payload: { taskId: 'task-1', format: 'markdown' }
       },
       {
         channel: IPC_CHANNELS.agent.sendMessage,

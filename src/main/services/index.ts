@@ -10,6 +10,7 @@ import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { EnvironmentService } from './EnvironmentService';
 import { ReportService } from './ReportService';
+import { TaskService } from './TaskService';
 import { TestCaseService } from './TestCaseService';
 import { TestRunService } from './TestRunService';
 import { ViewerService } from './ViewerService';
@@ -21,6 +22,7 @@ export interface AppAutoTestServices {
   env: EnvironmentService;
   reports: ReportService;
   runs: TestRunService;
+  tasks: TaskService;
   viewer: ViewerService;
 }
 
@@ -53,6 +55,10 @@ export function createDefaultServices(options: {
   const devices = new DeviceService({ provider: maestroProvider });
   const viewer = new ViewerService({ env: options.env });
   const agent = new AgentSessionService(agentProvider);
+  const cases = new TestCaseService({
+    maxUploadSizeBytes: config.maxUploadSizeBytes,
+    storage
+  });
   const runs = new TestRunService({
     agentService: agent,
     deviceService: devices,
@@ -64,6 +70,12 @@ export function createDefaultServices(options: {
     storage,
     testRunService: runs
   });
+  const tasks = new TaskService({
+    reports,
+    runService: runs,
+    storage,
+    testCaseService: cases
+  });
   const env = new EnvironmentService({
     agentService: agent,
     deviceService: devices,
@@ -72,14 +84,12 @@ export function createDefaultServices(options: {
 
   return {
     agent,
-    cases: new TestCaseService({
-      maxUploadSizeBytes: config.maxUploadSizeBytes,
-      storage
-    }),
+    cases,
     devices,
     env,
     reports,
     runs,
+    tasks,
     viewer
   };
 }
