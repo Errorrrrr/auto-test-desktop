@@ -77,6 +77,8 @@ type DeviceActionState = RunActionState & {
   deviceId?: string;
 };
 
+type MenuPage = 'overview' | 'task' | 'devices' | 'input' | 'run' | 'report' | 'viewer';
+
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 const RUN_STATUS_POLL_INTERVAL_MS = 1_000;
@@ -607,6 +609,7 @@ export function ReportPanel({
 
 export function App(): ReactElement {
   const [language, setLanguage] = useState<Language>(() => readStoredLanguage());
+  const [activePage, setActivePage] = useState<MenuPage>('overview');
   const [environment, setEnvironment] = useState<EnvironmentStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [viewerConfig, setViewerConfig] = useState<ViewerConfig | null>(null);
@@ -662,36 +665,132 @@ export function App(): ReactElement {
   const trimmedViewerUrl = viewerUrl.trim();
   const canOpenViewer = isAllowedLocalViewerUrl(trimmedViewerUrl);
   const taskEditable = canReuseTask(currentTask);
-  const flowSteps = [
+  const flowSteps: Array<{
+    page: MenuPage;
+    label: string;
+    detail: string;
+    done: boolean;
+  }> = [
     {
-      href: '#task',
+      page: 'task',
       label: copy.titles.createTask,
       detail: currentTask ? formatStatusLabel(currentTask.status, language) : copy.runtime.noTask,
       done: Boolean(currentTask)
     },
     {
-      href: '#devices',
+      page: 'devices',
       label: copy.titles.devices,
       detail: selectedDevice?.name ?? copy.runtime.notSelected,
       done: selectedDeviceCanExecute
     },
     {
-      href: '#input',
+      page: 'input',
       label: copy.titles.taskInput,
       detail: formatStatusLabel(readiness.inputMode, language),
       done: readiness.inputMode !== 'empty'
     },
     {
-      href: '#run',
+      page: 'run',
       label: copy.titles.executeTest,
       detail: currentTask?.latestRunId ?? copy.runtime.notStarted,
       done: Boolean(currentTask?.latestRunId)
     },
     {
-      href: '#report',
+      page: 'report',
       label: copy.titles.report,
       detail: report ? formatStatusLabel(report.status, language) : copy.runtime.notStarted,
       done: Boolean(report)
+    }
+  ];
+  const navigationItems: Array<{
+    page: MenuPage;
+    label: string;
+    icon: ReactElement;
+  }> = [
+    {
+      page: 'overview',
+      label: copy.nav.overview,
+      icon: <Activity size={18} aria-hidden="true" />
+    },
+    {
+      page: 'task',
+      label: copy.nav.task,
+      icon: <ClipboardList size={18} aria-hidden="true" />
+    },
+    {
+      page: 'devices',
+      label: copy.nav.devices,
+      icon: <Smartphone size={18} aria-hidden="true" />
+    },
+    {
+      page: 'input',
+      label: copy.nav.input,
+      icon: <UploadCloud size={18} aria-hidden="true" />
+    },
+    {
+      page: 'run',
+      label: copy.nav.run,
+      icon: <Play size={18} aria-hidden="true" />
+    },
+    {
+      page: 'report',
+      label: copy.nav.report,
+      icon: <FileText size={18} aria-hidden="true" />
+    },
+    {
+      page: 'viewer',
+      label: copy.nav.viewer,
+      icon: <MonitorSmartphone size={18} aria-hidden="true" />
+    }
+  ];
+  const menuCards: Array<{
+    page: MenuPage;
+    label: string;
+    detail: string;
+    status: string;
+    icon: ReactElement;
+  }> = [
+    {
+      page: 'task',
+      label: copy.titles.createTask,
+      detail: currentTask ? currentTask.name : copy.runtime.noTask,
+      status: currentTask?.status ?? 'idle',
+      icon: <ClipboardList size={20} aria-hidden="true" />
+    },
+    {
+      page: 'devices',
+      label: copy.titles.devices,
+      detail: selectedDevice?.name ?? copy.runtime.notSelected,
+      status: selectedDeviceCanExecute ? 'ready' : 'disconnected',
+      icon: <Smartphone size={20} aria-hidden="true" />
+    },
+    {
+      page: 'input',
+      label: copy.titles.taskInput,
+      detail: formatStatusLabel(readiness.inputMode, language),
+      status: readiness.inputMode,
+      icon: <UploadCloud size={20} aria-hidden="true" />
+    },
+    {
+      page: 'run',
+      label: copy.titles.executeTest,
+      detail: currentTask?.latestRunId ?? copy.runtime.notStarted,
+      status: currentTask?.status ?? runAction.status,
+      icon: <Play size={20} aria-hidden="true" />
+    },
+    {
+      page: 'report',
+      label: copy.titles.report,
+      detail: report ? formatStatusLabel(report.status, language) : copy.runtime.notStarted,
+      status: report?.status ?? 'idle',
+      icon: <FileText size={20} aria-hidden="true" />
+    },
+    {
+      page: 'viewer',
+      label: copy.titles.viewer,
+      detail: canOpenViewer ? trimmedViewerUrl : copy.copy.viewerUrlMustBeLocal,
+      status: viewerProbe.status,
+      icon: <MonitorSmartphone size={20} aria-hidden="true" />
     }
   ];
 
@@ -1136,30 +1235,18 @@ export function App(): ReactElement {
           </div>
         </div>
         <nav className="nav-list">
-          <a className="nav-item active" href="#overview">
-            <Activity size={18} aria-hidden="true" />
-            {copy.nav.overview}
-          </a>
-          <a className="nav-item" href="#task">
-            <ClipboardList size={18} aria-hidden="true" />
-            {copy.nav.task}
-          </a>
-          <a className="nav-item" href="#devices">
-            <Smartphone size={18} aria-hidden="true" />
-            {copy.nav.devices}
-          </a>
-          <a className="nav-item" href="#input">
-            <UploadCloud size={18} aria-hidden="true" />
-            {copy.nav.input}
-          </a>
-          <a className="nav-item" href="#run">
-            <Play size={18} aria-hidden="true" />
-            {copy.nav.run}
-          </a>
-          <a className="nav-item" href="#report">
-            <FileText size={18} aria-hidden="true" />
-            {copy.nav.report}
-          </a>
+          {navigationItems.map((item) => (
+            <button
+              key={item.page}
+              className={activePage === item.page ? 'nav-item active' : 'nav-item'}
+              data-target-page={item.page}
+              type="button"
+              onClick={() => setActivePage(item.page)}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
         </nav>
       </aside>
 
@@ -1204,34 +1291,6 @@ export function App(): ReactElement {
           </div>
         </header>
 
-        <section id="overview" className="panel-grid three">
-          <ServiceStatusCard
-            icon={<Cable size={20} aria-hidden="true" />}
-            title={copy.titles.agent}
-            health={environment?.agent}
-            footer={copy.runtime.session(agentSession?.status ?? copy.runtime.notStarted)}
-            language={language}
-          />
-          <ServiceStatusCard
-            icon={<Smartphone size={20} aria-hidden="true" />}
-            title={copy.titles.maestro}
-            health={environment?.maestro}
-            footer={copy.runtime.executableDevices(getExecutableDevices(devices).length)}
-            language={language}
-          />
-          <ServiceStatusCard
-            icon={<MonitorSmartphone size={20} aria-hidden="true" />}
-            title={copy.titles.viewer}
-            health={environment?.viewer}
-            footer={
-              viewerConfig
-                ? copy.runtime.viewerConfig(viewerConfig.source, viewerConfig.url)
-                : copy.runtime.viewerConfigLoading
-            }
-            language={language}
-          />
-        </section>
-
         <div className={`runtime-banner banner-${runtimeState.status}`}>
           <span>{localizeText(runtimeState.detail, language)}</span>
           <small>{copy.runtime.generated(runtimeGeneratedAt)}</small>
@@ -1239,21 +1298,79 @@ export function App(): ReactElement {
 
         <section className="flow-strip" aria-label={copy.titles.testFlow}>
           {flowSteps.map((step, index) => (
-            <a
-              key={step.href}
-              className={step.done ? 'flow-step complete' : 'flow-step'}
-              href={step.href}
+            <button
+              key={step.page}
+              className={[
+                'flow-step',
+                step.done ? 'complete' : '',
+                activePage === step.page ? 'active' : ''
+              ].filter(Boolean).join(' ')}
+              data-target-page={step.page}
+              type="button"
+              onClick={() => setActivePage(step.page)}
             >
               <span className="flow-index">{index + 1}</span>
               <span>
                 <strong>{step.label}</strong>
                 <small>{step.detail}</small>
               </span>
-            </a>
+            </button>
           ))}
         </section>
 
-        <section className="panel-grid two">
+        {activePage === 'overview' ? (
+          <section className="workspace-page overview-page" data-page="overview">
+            <section className="panel-grid three">
+              <ServiceStatusCard
+                icon={<Cable size={20} aria-hidden="true" />}
+                title={copy.titles.agent}
+                health={environment?.agent}
+                footer={copy.runtime.session(agentSession?.status ?? copy.runtime.notStarted)}
+                language={language}
+              />
+              <ServiceStatusCard
+                icon={<Smartphone size={20} aria-hidden="true" />}
+                title={copy.titles.maestro}
+                health={environment?.maestro}
+                footer={copy.runtime.executableDevices(getExecutableDevices(devices).length)}
+                language={language}
+              />
+              <ServiceStatusCard
+                icon={<MonitorSmartphone size={20} aria-hidden="true" />}
+                title={copy.titles.viewer}
+                health={environment?.viewer}
+                footer={
+                  viewerConfig
+                    ? copy.runtime.viewerConfig(viewerConfig.source, viewerConfig.url)
+                    : copy.runtime.viewerConfigLoading
+                }
+                language={language}
+              />
+            </section>
+
+            <section className="menu-card-grid" aria-label={copy.shell.navigationLabel}>
+              {menuCards.map((card) => (
+                <button
+                  key={card.page}
+                  className="menu-card"
+                  data-target-page={card.page}
+                  type="button"
+                  onClick={() => setActivePage(card.page)}
+                >
+                  <span className="menu-card-icon">{card.icon}</span>
+                  <span className="menu-card-copy">
+                    <strong>{card.label}</strong>
+                    <small>{card.detail}</small>
+                  </span>
+                  <StatusPill status={card.status} language={language} />
+                </button>
+              ))}
+            </section>
+          </section>
+        ) : null}
+
+        {activePage === 'task' ? (
+          <section className="workspace-page" data-page="task">
           <article className="panel task-panel" id="task">
             <div className="panel-heading split">
               <div>
@@ -1331,19 +1448,25 @@ export function App(): ReactElement {
               </div>
             )}
           </article>
+          </section>
+        ) : null}
 
-          <DeviceListPanel
-            devices={devices}
-            selectedDeviceId={selectedDeviceId}
-            onSelectDevice={setSelectedDeviceId}
-            onCheckDevices={() => void handleCheckDevices()}
-            onStartDevice={(device) => void handleStartDevice(device)}
-            deviceAction={deviceAction}
-            language={language}
-          />
-        </section>
+        {activePage === 'devices' ? (
+          <section className="workspace-page" data-page="devices">
+            <DeviceListPanel
+              devices={devices}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={setSelectedDeviceId}
+              onCheckDevices={() => void handleCheckDevices()}
+              onStartDevice={(device) => void handleStartDevice(device)}
+              deviceAction={deviceAction}
+              language={language}
+            />
+          </section>
+        ) : null}
 
-        <section className="panel-grid two">
+        {activePage === 'input' ? (
+          <section className="workspace-page" data-page="input">
           <article className="panel input-panel" id="input">
             <div className="panel-heading split">
               <div>
@@ -1407,7 +1530,11 @@ export function App(): ReactElement {
               </dl>
             ) : null}
           </article>
+          </section>
+        ) : null}
 
+        {activePage === 'run' ? (
+          <section className="workspace-page" data-page="run">
           <article className="panel run-panel" id="run">
             <div className="panel-heading split">
               <div>
@@ -1491,16 +1618,22 @@ export function App(): ReactElement {
               </ol>
             ) : null}
           </article>
-        </section>
+          </section>
+        ) : null}
 
-        <section className="panel-grid two">
+        {activePage === 'report' ? (
+          <section className="workspace-page" data-page="report">
           <ReportPanel
             report={report}
             exportState={reportExport}
             onExportMarkdown={() => void handleExportReport()}
             language={language}
           />
+          </section>
+        ) : null}
 
+        {activePage === 'viewer' ? (
+          <section className="workspace-page" data-page="viewer">
           <article className="panel" id="viewer">
             <div className="panel-heading split">
               <div>
@@ -1559,7 +1692,8 @@ export function App(): ReactElement {
             </div>
             <span className="subtle-line">{copy.copy.requirementHint}</span>
           </article>
-        </section>
+          </section>
+        ) : null}
       </section>
     </main>
   );

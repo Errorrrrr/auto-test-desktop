@@ -89,7 +89,7 @@ describe('app shell scrolling', () => {
     }
   });
 
-  it('renders the user-approved task flow before the work panels', () => {
+  it('renders the user-approved task flow as menu page entries', () => {
     vi.stubGlobal('window', { appAutoTest: undefined });
 
     try {
@@ -101,7 +101,34 @@ describe('app shell scrolling', () => {
       expect(html).toContain('上传用例或自然语言');
       expect(html).toContain('执行测试');
       expect(html).toContain('报告');
-      expect(html.indexOf('class="flow-strip"')).toBeLessThan(html.indexOf('id="task"'));
+      expect(html).toContain('data-target-page="task"');
+      expect(html).toContain('data-target-page="devices"');
+      expect(html).toContain('data-target-page="input"');
+      expect(html).toContain('data-target-page="run"');
+      expect(html).toContain('data-target-page="report"');
+      expect(html.indexOf('class="flow-strip"')).toBeLessThan(
+        html.indexOf('class="menu-card-grid"')
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the default home page as a workbench menu instead of one long workflow page', () => {
+    vi.stubGlobal('window', { appAutoTest: undefined });
+
+    try {
+      const html = renderToStaticMarkup(<App />);
+
+      expect(html).toContain('data-page="overview"');
+      expect(html).toContain('class="menu-card-grid"');
+      expect(html).toContain('data-target-page="viewer"');
+      expect(html).not.toContain('id="task"');
+      expect(html).not.toContain('id="devices"');
+      expect(html).not.toContain('id="input"');
+      expect(html).not.toContain('id="run"');
+      expect(html).not.toContain('id="report"');
+      expect(html).not.toContain('id="viewer"');
     } finally {
       vi.unstubAllGlobals();
     }
