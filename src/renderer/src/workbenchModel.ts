@@ -7,6 +7,8 @@ import type {
   TestCaseImportRequest,
   TestCaseManifest,
   TestReport,
+  TestTask,
+  TaskInputMode,
   TestRun,
   TestRunStatus,
   ViewerProbeResult,
@@ -43,6 +45,7 @@ export type RunReadiness = {
   canStart: boolean;
   reasons: string[];
   selectedDevice?: DeviceInfo;
+  inputMode: TaskInputMode;
 };
 
 export type DeviceInspectionSummary = {
@@ -165,14 +168,38 @@ function uniqueMessages(messages: string[]): string[] {
   return Array.from(new Set(messages.filter(Boolean)));
 }
 
+function isUsableServiceStatus(status: ServiceStatus): boolean {
+  return status === 'ready' || status === 'degraded';
+}
+
+export function getTaskInputMode(task: TestTask | null, prompt: string): TaskInputMode {
+  const hasPrompt = Boolean(prompt.trim() || task?.input.naturalLanguage?.prompt?.trim());
+  const hasTestCase = Boolean(task?.input.testCase);
+
+  if (hasPrompt && hasTestCase) {
+    return 'mixed';
+  }
+
+  if (hasTestCase) {
+    return 'test_case';
+  }
+
+  if (hasPrompt) {
+    return 'natural_language';
+  }
+
+  return 'empty';
+}
+
 export function getRunReadiness(input: {
   environment: EnvironmentStatus | null;
   devices: DeviceInfo[];
   selectedDeviceId: string;
-  importedCase: TestCaseManifest | null;
+  task: TestTask | null;
   prompt: string;
 }): RunReadiness {
   const selectedDevice = getSelectedDevice(input.devices, input.selectedDeviceId);
+  const inputMode = getTaskInputMode(input.task, input.prompt);
   const reasons: string[] = [];
 
   if (!input.environment) {
@@ -185,16 +212,25 @@ export function getRunReadiness(input: {
     reasons.push('Selected device is not connected for execution.');
   }
 
-  if (!input.importedCase || input.importedCase.status !== 'imported') {
-    reasons.push('Import a valid Maestro test case.');
+  if (input.environment && !isUsableServiceStatus(input.environment.maestro.status)) {
+    reasons.push(input.environment.maestro.detail || 'Maestro provider is not available.');
   }
 
-  if (!input.prompt.trim()) {
-    reasons.push('Enter an Agent instruction.');
+  if (inputMode === 'empty') {
+    reasons.push(...(input.task?.input.blockers.length ? input.task.input.blockers : [
+      'Task input is required before execution.'
+    ]));
   }
 
-  if (input.environment && !input.environment.canStartRun) {
-    reasons.push(...input.environment.blockers);
+  if (input.task?.latestRunId || input.task?.status === 'queued' || input.task?.status === 'running') {
+    reasons.push(`Task ${input.task.id} has already been started.`);
+  }
+
+  if (
+    input.task &&
+    ['blocked', 'cancelled', 'failed', 'succeeded', 'timeout'].includes(input.task.status)
+  ) {
+    reasons.push(`Task ${input.task.id} is already ${input.task.status}.`);
   }
 
   const uniqueReasons = uniqueMessages(reasons);
@@ -202,7 +238,8 @@ export function getRunReadiness(input: {
   return {
     canStart: uniqueReasons.length === 0,
     reasons: uniqueReasons,
-    selectedDevice
+    selectedDevice,
+    inputMode
   };
 }
 

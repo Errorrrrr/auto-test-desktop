@@ -27,9 +27,6 @@ import type {
   ServiceHealth,
   TaskReport,
   TestTask,
-  TestCaseManifest,
-  TestReport,
-  TestRun,
   ViewerConfig
 } from '../../shared/types';
 import { getViewerConfig, isAllowedLocalViewerUrl } from '../../shared/viewerConfig';
@@ -47,7 +44,6 @@ import {
   createInitialUploadState,
   createInitialViewerProbeState,
   createCaseImportRequest,
-  createReportPlaceholder,
   formatDateTime,
   formatDuration,
   getDeviceInspectionSummary,
@@ -79,17 +75,17 @@ type DeviceActionState = RunActionState & {
   deviceId?: string;
 };
 
-type ReportContext = {
-  device?: DeviceInfo;
-  testCase?: TestCaseManifest;
-};
-
-const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
+const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 const RUN_STATUS_POLL_INTERVAL_MS = 1_000;
 const RUN_STATUS_MAX_POLLS = 120;
 
-function isTerminalRunStatus(status: TestRun['status']): boolean {
-  return TERMINAL_RUN_STATUSES.has(status);
+function isTerminalTaskStatus(status: TestTask['status']): boolean {
+  return TERMINAL_TASK_STATUSES.has(status);
+}
+
+function isActiveTaskStatus(status: TestTask['status']): boolean {
+  return ACTIVE_TASK_STATUSES.has(status);
 }
 
 function createBrowserFallbackTask(options: {
@@ -526,9 +522,7 @@ export function ReportPanel({
   onExportMarkdown,
   language = 'en'
 }: {
-  report: TestReport | null;
-  run: TestRun | null;
-  context: ReportContext | null;
+  report: TaskReport | null;
   exportState: RunActionState;
   onExportMarkdown: () => void;
   language?: Language;
@@ -585,7 +579,7 @@ export function ReportPanel({
         </div>
         <div>
           <dt>{copy.fields.case}</dt>
-          <dd>{report.testCase}</dd>
+          <dd>{report.inputSummary}</dd>
         </div>
         <div>
           <dt>{copy.fields.duration}</dt>
@@ -593,11 +587,11 @@ export function ReportPanel({
         </div>
         <div>
           <dt>{copy.fields.generated}</dt>
-          <dd>{formatDateTime(report.generatedAt, language)}</dd>
+          <dd>{formatDateTime(report.endedAt, language)}</dd>
         </div>
       </dl>
 
-      <p>{localizeText(report.summary, language)}</p>
+      <p>{localizeText(report.conclusion, language)}</p>
       {exportState.status !== 'idle' ? (
         <p className="muted">{localizeText(exportState.detail, language)}</p>
       ) : null}
@@ -619,8 +613,8 @@ export function App(): ReactElement {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [uploadState, setUploadState] = useState<UploadState>(() => createInitialUploadState());
-  const [importedCase, setImportedCase] = useState<TestCaseManifest | null>(null);
-  const [agentSession, setAgentSession] = useState<AgentSession | null>(null);
+  const [currentTask, setCurrentTask] = useState<TestTask | null>(null);
+  const [agentSession] = useState<AgentSession | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [runtimeState, setRuntimeState] = useState<RunActionState>({
     status: 'idle',
@@ -638,9 +632,7 @@ export function App(): ReactElement {
     status: 'idle',
     detail: 'Report has not been exported.'
   });
-  const [currentRun, setCurrentRun] = useState<TestRun | null>(null);
-  const [report, setReport] = useState<TestReport | null>(null);
-  const [reportContext, setReportContext] = useState<ReportContext | null>(null);
+  const [report, setReport] = useState<TaskReport | null>(null);
 
   const copy = COPY[language];
   const api = useMemo(() => getApi(), []);
@@ -650,15 +642,64 @@ export function App(): ReactElement {
         environment,
         devices,
         selectedDeviceId,
-        importedCase,
+        task: currentTask,
         prompt
       }),
-    [devices, environment, importedCase, prompt, selectedDeviceId]
+    [currentTask, devices, environment, prompt, selectedDeviceId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
+  const currentTaskCase = currentTask?.input.testCase;
   const runtimeGeneratedAt = environment ? formatDateTime(environment.generatedAt, language) : copy.runtime.notLoaded;
   const trimmedViewerUrl = viewerUrl.trim();
   const canOpenViewer = isAllowedLocalViewerUrl(trimmedViewerUrl);
+
+  function getWorkbenchTaskName(nameHint?: string): string {
+    const trimmedPrompt = prompt.trim();
+
+    if (nameHint) {
+      return `Workbench task - ${nameHint}`;
+    }
+
+    if (trimmedPrompt) {
+      return `Workbench task - ${trimmedPrompt.slice(0, 40)}`;
+    }
+
+    return 'Workbench task';
+  }
+
+  function canReuseTask(task: TestTask | null): task is TestTask {
+    return Boolean(task && !task.latestRunId && !isActiveTaskStatus(task.status) && !isTerminalTaskStatus(task.status));
+  }
+
+  async function ensureEditableTask(nameHint?: string): Promise<TestTask> {
+    if (canReuseTask(currentTask)) {
+      return currentTask;
+    }
+
+    const task = await api.tasks.create({
+      name: getWorkbenchTaskName(nameHint)
+    });
+
+    setCurrentTask(task);
+    return task;
+  }
+
+  async function syncTaskPrompt(task: TestTask, nextPrompt: string): Promise<TestTask> {
+    const normalizedPrompt = nextPrompt.trim();
+    const currentPrompt = task.input.naturalLanguage?.prompt ?? '';
+
+    if (normalizedPrompt === currentPrompt) {
+      return task;
+    }
+
+    const updatedTask = await api.tasks.updateInput({
+      taskId: task.id,
+      ...(normalizedPrompt ? { prompt: normalizedPrompt } : {})
+    });
+
+    setCurrentTask(updatedTask);
+    return updatedTask;
+  }
 
   useEffect(() => {
     persistLanguage(language);
@@ -669,17 +710,23 @@ export function App(): ReactElement {
     setRuntimeState({ status: 'busy', detail: 'Refreshing local runtime status.' });
 
     try {
-      const [nextEnvironment, nextDevices, nextViewerConfig] = await Promise.all([
+      const [nextEnvironment, nextDevices, nextViewerConfig, tasks] = await Promise.all([
         api.env.getStatus(),
         api.devices.list(),
-        api.viewer.getConfig()
+        api.viewer.getConfig(),
+        api.tasks.list()
       ]);
+      const mostRecentTask = tasks[0];
 
       setEnvironment(nextEnvironment);
       setDevices(nextDevices);
       setViewerConfig(nextViewerConfig);
       setViewerUrl(nextViewerConfig.url);
       setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
+      setCurrentTask((task) => task ?? mostRecentTask ?? null);
+      if (mostRecentTask?.input.naturalLanguage?.prompt) {
+        setPrompt((value) => value || mostRecentTask.input.naturalLanguage?.prompt || '');
+      }
       setRuntimeState({
         status: 'success',
         detail: `Last refreshed ${formatDateTime(nextEnvironment.generatedAt, 'en')}.`
@@ -802,8 +849,7 @@ export function App(): ReactElement {
     const fileCandidate = file as File & { path?: string };
     const validation = validateCaseFile(fileCandidate);
 
-    setImportedCase(null);
-    setCurrentRun(null);
+    setCurrentTask((task) => (canReuseTask(task) ? task : null));
     setReport(null);
     setReportExport({
       status: 'idle',
@@ -822,16 +868,24 @@ export function App(): ReactElement {
     setUploadState({
       name: file.name,
       status: 'importing',
-      detail: 'Importing through the preload case API.'
+      detail: 'Importing through the task workspace API.'
     });
 
     try {
-      const manifest = await api.cases.import(createCaseImportRequest(fileCandidate));
-      setImportedCase(manifest);
+      const task = await syncTaskPrompt(await ensureEditableTask(file.name), prompt);
+      const updatedTask = await api.tasks.importCase({
+        taskId: task.id,
+        ...createCaseImportRequest(fileCandidate)
+      });
+      const taskCase = updatedTask.input.testCase;
+
+      setCurrentTask(updatedTask);
       setUploadState({
-        name: manifest.name,
-        status: manifest.status === 'imported' ? 'accepted' : 'rejected',
-        detail: manifest.validationMessages[0] ?? `${manifest.format.toUpperCase()} case imported.`
+        name: taskCase?.name ?? file.name,
+        status: taskCase ? 'accepted' : 'rejected',
+        detail: taskCase
+          ? `${taskCase.format.toUpperCase()} case imported into ${updatedTask.name}.`
+          : updatedTask.failureReason ?? 'Task import did not produce a test case.'
       });
     } catch (error) {
       setUploadState({
@@ -842,44 +896,28 @@ export function App(): ReactElement {
     }
   }
 
-  async function createRunReport(
-    run: TestRun,
-    context: ReportContext,
-    error?: string
-  ): Promise<TestReport> {
-    try {
-      return await api.reports.get(run.id);
-    } catch (reportError) {
-      return createReportPlaceholder({
-        run,
-        ...context,
-        error: error ?? getErrorMessage(reportError)
-      }, 'en');
-    }
-  }
-
-  async function pollRunUntilSettled(runId: string, context: ReportContext): Promise<void> {
+  async function pollTaskUntilSettled(taskId: string): Promise<void> {
     for (let attempt = 0; attempt < RUN_STATUS_MAX_POLLS; attempt += 1) {
-      const latestRun = await api.runs.getStatus(runId);
-      const latestReport = await createRunReport(latestRun, context);
+      const latestTask = await api.tasks.get(taskId);
+      const latestReport = await api.tasks.getReport(taskId);
 
-      setCurrentRun(latestRun);
+      setCurrentTask(latestTask);
       setReport(latestReport);
 
-      if (isTerminalRunStatus(latestRun.status)) {
+      if (isTerminalTaskStatus(latestTask.status)) {
         const completedWithoutFailure =
-          latestRun.status === 'succeeded' || latestRun.status === 'cancelled';
+          latestTask.status === 'succeeded' || latestTask.status === 'cancelled';
 
         setRunAction({
           status: completedWithoutFailure ? 'success' : 'error',
-          detail: `Run ${latestRun.id} finished as ${formatStatusLabel(latestRun.status, 'en')}.`
+          detail: `Task ${latestTask.id} finished as ${formatStatusLabel(latestTask.status, 'en')}.`
         });
         return;
       }
 
       setRunAction({
         status: 'busy',
-        detail: `Run ${latestRun.id} is ${formatStatusLabel(latestRun.status, 'en')}.`
+        detail: `Task ${latestTask.id} is ${formatStatusLabel(latestTask.status, 'en')}.`
       });
 
       await new Promise((resolve) => {
@@ -894,7 +932,7 @@ export function App(): ReactElement {
   }
 
   async function handleStartRun(): Promise<void> {
-    if (!readiness.canStart || !readiness.selectedDevice || !importedCase) {
+    if (!readiness.canStart || !readiness.selectedDevice) {
       setRunAction({
         status: 'error',
         detail: readiness.reasons.join(' ')
@@ -902,11 +940,9 @@ export function App(): ReactElement {
       return;
     }
 
-    const instruction = prompt.trim();
-
     setRunAction({
       status: 'busy',
-      detail: 'Sending Agent instruction and starting the local run.'
+      detail: 'Starting the task-scoped local run.'
     });
     setReportExport({
       status: 'idle',
@@ -914,39 +950,32 @@ export function App(): ReactElement {
     });
 
     try {
-      const session = agentSession ?? (await api.agent.createSession());
-      const userMessage: AgentMessage = {
-        id: `local-user-${Date.now()}`,
-        sessionId: session.id,
-        role: 'user',
-        content: instruction,
-        createdAt: new Date().toISOString()
-      };
-      const agentReply = await api.agent.sendMessage({
-        sessionId: session.id,
-        content: instruction
+      const task = await syncTaskPrompt(await ensureEditableTask(), prompt);
+      const startedTask = await api.tasks.start({
+        taskId: task.id,
+        deviceId: readiness.selectedDevice.id
       });
-      const run = await api.runs.start({
-        caseId: importedCase.id,
-        deviceId: readiness.selectedDevice.id,
-        prompt: instruction
-      });
-      const context = {
-        device: readiness.selectedDevice,
-        testCase: importedCase
-      };
-      const nextReport = await createRunReport(run, context);
+      const nextReport = await api.tasks.getReport(startedTask.id);
 
-      setAgentSession(session);
-      setAgentMessages((messages) => [...messages, userMessage, agentReply]);
-      setCurrentRun(run);
+      if (prompt.trim()) {
+        setAgentMessages((messages) => [
+          ...messages,
+          {
+            id: `local-user-${Date.now()}`,
+            sessionId: startedTask.id,
+            role: 'user',
+            content: prompt.trim(),
+            createdAt: new Date().toISOString()
+          }
+        ]);
+      }
+      setCurrentTask(startedTask);
       setReport(nextReport);
-      setReportContext(context);
       setRunAction({
-        status: run.status === 'failed' || run.status === 'blocked' ? 'error' : 'success',
-        detail: `Run ${run.id} is ${formatStatusLabel(run.status, 'en')}.`
+        status: startedTask.status === 'failed' || startedTask.status === 'blocked' ? 'error' : 'success',
+        detail: `Task ${startedTask.id} is ${formatStatusLabel(startedTask.status, 'en')}.`
       });
-      await pollRunUntilSettled(run.id, context);
+      await pollTaskUntilSettled(startedTask.id);
     } catch (error) {
       setRunAction({
         status: 'error',
@@ -956,24 +985,24 @@ export function App(): ReactElement {
   }
 
   async function handleCancelRun(): Promise<void> {
-    if (!currentRun) {
+    if (!currentTask) {
       return;
     }
 
     setRunAction({
       status: 'busy',
-      detail: `Cancelling ${currentRun.id}.`
+      detail: `Cancelling ${currentTask.id}.`
     });
 
     try {
-      const cancelledRun = await api.runs.cancel(currentRun.id);
-      const nextReport = await createRunReport(cancelledRun, reportContext ?? {});
+      const cancelledTask = await api.tasks.cancel(currentTask.id);
+      const nextReport = await api.tasks.getReport(cancelledTask.id);
 
-      setCurrentRun(cancelledRun);
+      setCurrentTask(cancelledTask);
       setReport(nextReport);
       setRunAction({
         status: 'success',
-        detail: `Run ${cancelledRun.id} is ${formatStatusLabel(cancelledRun.status, 'en')}.`
+        detail: `Task ${cancelledTask.id} is ${formatStatusLabel(cancelledTask.status, 'en')}.`
       });
     } catch (error) {
       setRunAction({
@@ -984,7 +1013,7 @@ export function App(): ReactElement {
   }
 
   async function handleExportReport(): Promise<void> {
-    if (!currentRun) {
+    if (!currentTask) {
       return;
     }
 
@@ -994,8 +1023,8 @@ export function App(): ReactElement {
     });
 
     try {
-      const exportedReport = await api.reports.export({
-        runId: currentRun.id,
+      const exportedReport = await api.tasks.exportReport({
+        taskId: currentTask.id,
         format: 'markdown'
       });
 
@@ -1214,15 +1243,15 @@ export function App(): ReactElement {
               accept=".yaml,.yml"
               onChange={(event) => void handleCaseUpload(event)}
             />
-            {importedCase ? (
+            {currentTaskCase ? (
               <dl className="metric-grid compact">
                 <div>
                   <dt>{copy.fields.format}</dt>
-                  <dd>{importedCase.format.toUpperCase()}</dd>
+                  <dd>{currentTaskCase.format.toUpperCase()}</dd>
                 </div>
                 <div>
                   <dt>{copy.fields.imported}</dt>
-                  <dd>{formatDateTime(importedCase.importedAt, language)}</dd>
+                  <dd>{formatDateTime(currentTaskCase.importedAt, language)}</dd>
                 </div>
               </dl>
             ) : null}
@@ -1272,10 +1301,10 @@ export function App(): ReactElement {
                 <CheckCircle2 size={20} aria-hidden="true" />
                 <h2>{copy.titles.runStatus}</h2>
               </div>
-              <StatusPill status={currentRun?.status ?? runAction.status} language={language} />
+              <StatusPill status={currentTask?.status ?? runAction.status} language={language} />
             </div>
             <p>{localizeText(runAction.detail, language)}</p>
-            {currentRun && !isTerminalRunStatus(currentRun.status) ? (
+            {currentTask && isActiveTaskStatus(currentTask.status) ? (
               <button
                 className="icon-button"
                 onClick={() => void handleCancelRun()}
@@ -1285,23 +1314,27 @@ export function App(): ReactElement {
                 {copy.actions.cancel}
               </button>
             ) : null}
-            {currentRun ? (
+            {currentTask ? (
               <dl className="metric-grid">
                 <div>
+                  <dt>{copy.fields.task}</dt>
+                  <dd>{currentTask.id}</dd>
+                </div>
+                <div>
                   <dt>{copy.fields.run}</dt>
-                  <dd>{currentRun.id}</dd>
+                  <dd>{currentTask.latestRunId ?? copy.runtime.notStarted}</dd>
                 </div>
                 <div>
                   <dt>{copy.fields.case}</dt>
-                  <dd>{currentRun.caseId}</dd>
+                  <dd>{currentTask.input.testCase?.name ?? currentTask.input.mode}</dd>
                 </div>
                 <div>
                   <dt>{copy.fields.device}</dt>
-                  <dd>{currentRun.deviceId}</dd>
+                  <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
                 </div>
                 <div>
                   <dt>{copy.fields.updated}</dt>
-                  <dd>{formatDateTime(currentRun.updatedAt, language)}</dd>
+                  <dd>{formatDateTime(currentTask.updatedAt, language)}</dd>
                 </div>
               </dl>
             ) : (
@@ -1328,8 +1361,6 @@ export function App(): ReactElement {
 
           <ReportPanel
             report={report}
-            run={currentRun}
-            context={reportContext}
             exportState={reportExport}
             onExportMarkdown={() => void handleExportReport()}
             language={language}
