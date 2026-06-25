@@ -8,9 +8,16 @@ import type {
   DeviceStartResult,
   EnvironmentStatus,
   ReportExportRequest,
+  TaskCreateRequest,
+  TaskImportCaseRequest,
+  TaskReport,
+  TaskReportExportRequest,
+  TaskStartRequest,
+  TaskUpdateInputRequest,
   TestCaseImportRequest,
   TestCaseManifest,
   TestReport,
+  TestTask,
   TestRun,
   TestRunStartRequest,
   ViewerConfig,
@@ -45,6 +52,20 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
       get: (runId: string) => invoke<TestReport>(IPC_CHANNELS.reports.get, { runId }),
       export: (request: ReportExportRequest) =>
         invoke<TestReport>(IPC_CHANNELS.reports.export, request)
+    },
+    tasks: {
+      create: (request: TaskCreateRequest) => invoke<TestTask>(IPC_CHANNELS.tasks.create, request),
+      list: () => invoke<TestTask[]>(IPC_CHANNELS.tasks.list),
+      get: (taskId: string) => invoke<TestTask>(IPC_CHANNELS.tasks.get, { taskId }),
+      updateInput: (request: TaskUpdateInputRequest) =>
+        invoke<TestTask>(IPC_CHANNELS.tasks.updateInput, request),
+      importCase: (request: TaskImportCaseRequest) =>
+        invoke<TestTask>(IPC_CHANNELS.tasks.importCase, request),
+      start: (request: TaskStartRequest) => invoke<TestTask>(IPC_CHANNELS.tasks.start, request),
+      cancel: (taskId: string) => invoke<TestTask>(IPC_CHANNELS.tasks.cancel, { taskId }),
+      getReport: (taskId: string) => invoke<TaskReport>(IPC_CHANNELS.tasks.getReport, { taskId }),
+      exportReport: (request: TaskReportExportRequest) =>
+        invoke<TaskReport>(IPC_CHANNELS.tasks.exportReport, request)
     },
     agent: {
       createSession: () => invoke<AgentSession>(IPC_CHANNELS.agent.createSession),

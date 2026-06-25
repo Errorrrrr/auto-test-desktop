@@ -5,6 +5,7 @@ import type {
   DeviceStartResult,
   EnvironmentStatus,
   TestCaseManifest,
+  TestTask,
   TestRun
 } from '../../shared/types';
 import {
@@ -75,6 +76,30 @@ const importedCase: TestCaseManifest = {
   validationMessages: []
 };
 
+function createTask(overrides: Partial<TestTask> = {}): TestTask {
+  return {
+    id: 'task-1',
+    name: 'Smoke task',
+    status: 'ready',
+    input: {
+      mode: 'test_case',
+      testCase: {
+        caseId: importedCase.id,
+        name: importedCase.name,
+        storedPath: importedCase.storedPath ?? importedCase.sourcePath,
+        format: importedCase.format,
+        source: 'uploaded',
+        importedAt: importedCase.importedAt
+      },
+      blockers: []
+    },
+    workspacePath: '/tmp/tasks/task-1',
+    createdAt: '2026-06-12T06:00:00Z',
+    updatedAt: '2026-06-12T06:00:00Z',
+    ...overrides
+  };
+}
+
 function createEnvironment(overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus {
   return {
     generatedAt: '2026-06-12T06:00:00Z',
@@ -120,27 +145,57 @@ describe('workbench run readiness', () => {
       }),
       devices: [disconnectedDevice],
       selectedDeviceId: disconnectedDevice.id,
-      importedCase,
+      task: createTask(),
       prompt: 'Run smoke'
     });
 
     expect(readiness.canStart).toBe(false);
     expect(readiness.reasons).toContain('Selected device is not connected for execution.');
-    expect(readiness.reasons).toContain('No connected Android or iOS device is available.');
+    expect(readiness.reasons).not.toContain('No connected Android or iOS device is available.');
   });
 
-  it('allows runs when environment, device, case, and prompt are ready', () => {
+  it('allows uploaded task runs without requiring an Agent prompt', () => {
     const readiness = getRunReadiness({
-      environment: createEnvironment(),
+      environment: createEnvironment({
+        agent: {
+          status: 'not_configured',
+          label: 'Agent',
+          detail: 'Local agent confirmation is not available.'
+        },
+        canStartRun: false,
+        blockers: ['Local agent confirmation is not available.'],
+        capabilities: {
+          uploads: ['.yaml', '.yml'],
+          reports: ['page', 'markdown'],
+          execution: 'mock_disabled'
+        }
+      }),
       devices: [connectedDevice],
       selectedDeviceId: connectedDevice.id,
-      importedCase,
-      prompt: 'Run smoke'
+      task: createTask(),
+      prompt: ''
     });
 
     expect(readiness.canStart).toBe(true);
     expect(readiness.reasons).toEqual([]);
     expect(readiness.selectedDevice).toEqual(connectedDevice);
+    expect(readiness.inputMode).toBe('test_case');
+  });
+
+  it('blocks active task restarts instead of starting duplicate runs', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: createTask({
+        status: 'running',
+        latestRunId: 'run-1'
+      }),
+      prompt: ''
+    });
+
+    expect(readiness.canStart).toBe(false);
+    expect(readiness.reasons).toContain('Task task-1 has already been started.');
   });
 });
 
@@ -347,7 +402,7 @@ describe('workbench localization', () => {
       environment: null,
       devices: [],
       selectedDeviceId: '',
-      importedCase: null,
+      task: null,
       prompt: ''
     });
 

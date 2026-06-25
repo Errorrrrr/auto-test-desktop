@@ -20,6 +20,15 @@ export function createIpcHandlers(services: AppAutoTestServices): IpcHandlers {
     [IPC_CHANNELS.runs.getStatus]: (payload: unknown) => services.runs.getStatus(payload),
     [IPC_CHANNELS.reports.get]: (payload: unknown) => services.reports.get(payload),
     [IPC_CHANNELS.reports.export]: (payload: unknown) => services.reports.exportReport(payload),
+    [IPC_CHANNELS.tasks.create]: (payload: unknown) => services.tasks.create(payload),
+    [IPC_CHANNELS.tasks.list]: () => services.tasks.list(),
+    [IPC_CHANNELS.tasks.get]: (payload: unknown) => services.tasks.get(payload),
+    [IPC_CHANNELS.tasks.updateInput]: (payload: unknown) => services.tasks.updateInput(payload),
+    [IPC_CHANNELS.tasks.importCase]: (payload: unknown) => services.tasks.importCase(payload),
+    [IPC_CHANNELS.tasks.start]: (payload: unknown) => services.tasks.start(payload),
+    [IPC_CHANNELS.tasks.cancel]: (payload: unknown) => services.tasks.cancel(payload),
+    [IPC_CHANNELS.tasks.getReport]: (payload: unknown) => services.tasks.getReport(payload),
+    [IPC_CHANNELS.tasks.exportReport]: (payload: unknown) => services.tasks.exportReport(payload),
     [IPC_CHANNELS.agent.createSession]: () => services.agent.createSession(),
     [IPC_CHANNELS.agent.sendMessage]: (payload: unknown) => services.agent.sendMessage(payload)
   };

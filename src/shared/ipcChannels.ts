@@ -22,6 +22,17 @@ export const IPC_CHANNELS = {
     get: 'reports:get',
     export: 'reports:export'
   },
+  tasks: {
+    create: 'tasks:create',
+    list: 'tasks:list',
+    get: 'tasks:get',
+    updateInput: 'tasks:update-input',
+    importCase: 'tasks:import-case',
+    start: 'tasks:start',
+    cancel: 'tasks:cancel',
+    getReport: 'tasks:get-report',
+    exportReport: 'tasks:export-report'
+  },
   agent: {
     createSession: 'agent:create-session',
     sendMessage: 'agent:send-message'

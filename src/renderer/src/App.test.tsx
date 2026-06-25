@@ -5,11 +5,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import type { DeviceInfo, TestCaseManifest, TestReport, TestRun } from '../../shared/types';
+import type { DeviceInfo, TaskReport } from '../../shared/types';
 import { App, DeviceListPanel, ReportPanel, openAllowedViewerUrl } from './App';
-import { createReportPlaceholder } from './workbenchModel';
 
 const rendererStyles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 
 describe('viewer open action', () => {
   it('opens only local viewer URLs from the renderer', () => {
@@ -104,6 +104,15 @@ describe('app shell scrolling', () => {
 });
 
 describe('workbench panels', () => {
+  it('keeps the renderer workflow on task-scoped APIs instead of legacy run APIs', () => {
+    expect(appSource).toContain('api.tasks.importCase');
+    expect(appSource).toContain('api.tasks.start');
+    expect(appSource).toContain('api.tasks.cancel');
+    expect(appSource).toContain('api.tasks.getReport');
+    expect(appSource).toContain('api.tasks.exportReport');
+    expect(appSource).not.toMatch(/api\.(cases|runs|reports)\./);
+  });
+
   it('renders disconnected devices as disabled execution targets', () => {
     const devices: DeviceInfo[] = [
       {
@@ -180,30 +189,20 @@ describe('workbench panels', () => {
     expect(html.match(/>Start</g)).toHaveLength(1);
   });
 
-  it('renders a failed run report with redacted report fields only', () => {
-    const run: TestRun = {
-      id: 'run-1',
-      caseId: 'case-1',
-      deviceId: 'android-1',
-      prompt: 'Run smoke',
-      status: 'failed',
-      createdAt: '2026-06-12T06:00:00Z',
-      updatedAt: '2026-06-12T06:00:03Z',
-      failureReason: 'Authorization: Bearer secret-token failed for /Users/alice/.maestro'
-    };
-    const report: TestReport = {
-      runId: run.id,
+  it('renders a failed task report with redacted report fields only', () => {
+    const report: TaskReport = {
+      taskId: 'task-1',
+      runId: 'run-1',
       title: 'Smoke report',
       status: 'failed',
-      generatedAt: run.updatedAt,
-      summary: 'The run failed.',
+      inputMode: 'test_case',
+      inputSummary: 'Uploaded test case smoke.yaml (case-1)',
       targetDevice: 'Pixel 8 (android-1, android/emulator)',
-      testCase: 'smoke.yaml (case-1)',
-      prompt: 'Run smoke',
-      startedAt: run.createdAt,
-      endedAt: run.updatedAt,
+      startedAt: '2026-06-12T06:00:00Z',
+      endedAt: '2026-06-12T06:00:03Z',
       conclusion: 'Failed',
       failureReason: 'Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro',
+      artifacts: [],
       markdown:
         '# Smoke report\n\n- Status: failed\n- Failure reason: Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro'
     };
@@ -211,28 +210,9 @@ describe('workbench panels', () => {
     const html = renderToStaticMarkup(
       <ReportPanel
         report={report}
-        run={run}
         exportState={{
           status: 'idle',
           detail: 'Report has not been exported.'
-        }}
-        context={{
-          device: {
-            id: 'android-1',
-            name: 'Pixel 8',
-            platform: 'android',
-            type: 'emulator',
-            connected: true
-          },
-          testCase: {
-            id: 'case-1',
-            name: 'smoke.yaml',
-            sourcePath: 'smoke.yaml',
-            format: 'yaml',
-            importedAt: '2026-06-12T06:00:00Z',
-            status: 'imported',
-            validationMessages: []
-          }
         }}
         onExportMarkdown={() => undefined}
       />
@@ -246,50 +226,31 @@ describe('workbench panels', () => {
     expect(html).toContain('Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro');
   });
 
-  it('keeps fallback placeholder secrets out of report HTML and markdown', () => {
-    const run: TestRun = {
-      id: 'run-2',
-      caseId: 'case-1',
-      deviceId: 'android-1',
-      prompt: 'Run smoke with token=secret-token from /Users/alice/.maestro',
+  it('keeps task report secrets out of report HTML and markdown', () => {
+    const report: TaskReport = {
+      taskId: 'task-2',
+      runId: 'run-2',
+      title: 'Smoke report',
       status: 'failed',
-      createdAt: '2026-06-12T06:00:00Z',
-      updatedAt: '2026-06-12T06:00:03Z',
-      failureReason: 'Authorization: Bearer secret-token failed for /Users/alice/.maestro'
+      inputMode: 'mixed',
+      inputSummary: 'Uploaded test case smoke.yaml (case-1) with prompt: token=[REDACTED] from /Users/[REDACTED]/.maestro',
+      targetDevice: 'Pixel 8 (android-1, android/emulator)',
+      startedAt: '2026-06-12T06:00:00Z',
+      endedAt: '2026-06-12T06:00:03Z',
+      conclusion: 'Failed',
+      failureReason: 'Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro',
+      artifacts: [],
+      markdown:
+        '# Smoke report\n\n- Prompt: token=[REDACTED] from /Users/[REDACTED]/.maestro\n- Failure reason: Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro\n- Fallback: api_key=[REDACTED] at /Users/[REDACTED]/.maestro'
     };
-    const context = {
-      device: {
-        id: 'android-1',
-        name: 'Pixel 8',
-        platform: 'android',
-        type: 'emulator',
-        connected: true
-      } satisfies DeviceInfo,
-      testCase: {
-        id: 'case-1',
-        name: 'smoke.yaml',
-        sourcePath: 'smoke.yaml',
-        format: 'yaml',
-        importedAt: '2026-06-12T06:00:00Z',
-        status: 'imported',
-        validationMessages: []
-      } satisfies TestCaseManifest
-    };
-    const report = createReportPlaceholder({
-      run,
-      ...context,
-      error: 'Report fallback used api_key=secret-key at /Users/alice/.maestro'
-    });
 
     const html = renderToStaticMarkup(
       <ReportPanel
         report={report}
-        run={run}
         exportState={{
           status: 'idle',
           detail: 'Report has not been exported.'
         }}
-        context={context}
         onExportMarkdown={() => undefined}
       />
     );

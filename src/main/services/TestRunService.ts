@@ -15,6 +15,15 @@ type TestRunServiceOptions = {
   testCaseStore: FileManifestStore<TestCaseManifest>;
 };
 
+export interface TaskRunStartRequest {
+  taskId: string;
+  caseId: string;
+  caseName?: string;
+  deviceId: string;
+  flowPath: string;
+  prompt?: string;
+}
+
 const TERMINAL_STATUSES = new Set<TestRun['status']>([
   'succeeded',
   'failed',
@@ -114,6 +123,52 @@ export class TestRunService {
     return run;
   }
 
+  async startForTask(request: TaskRunStartRequest): Promise<TestRun> {
+    const [maestroHealth, devices] = await Promise.all([
+      this.deviceService.getHealth(),
+      this.deviceService.listDevices()
+    ]);
+
+    if (!isUsableMaestroStatus(maestroHealth.status)) {
+      throw new AppError('MAESTRO_NOT_AVAILABLE', maestroHealth.detail);
+    }
+
+    const device = devices.find((candidate) => candidate.id === request.deviceId);
+
+    if (!device || !isExecutableDevice(device)) {
+      throw new AppError(
+        'DEVICE_NOT_AVAILABLE',
+        'No connected Android or iOS device is available for this run.'
+      );
+    }
+
+    if (!request.flowPath.trim()) {
+      throw new AppError('INVALID_ARGUMENT', 'flowPath is required.');
+    }
+
+    const now = new Date().toISOString();
+    const run: TestRun = {
+      id: `run-${randomUUID()}`,
+      taskId: request.taskId,
+      caseId: request.caseId,
+      caseName: request.caseName,
+      casePath: request.flowPath,
+      deviceId: request.deviceId,
+      deviceName: device.name,
+      devicePlatform: device.platform,
+      deviceType: device.type,
+      prompt: request.prompt ?? '',
+      status: 'queued',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await this.recordRun(run);
+    void this.executeRun(run.id, request.flowPath);
+
+    return run;
+  }
+
   async cancel(request: unknown): Promise<TestRun> {
     const runId = requireStringField(request, 'runId');
     const existing = await this.getRun(runId);
@@ -140,8 +195,8 @@ export class TestRunService {
     }
 
     this.cancelledRunIds.add(runId);
-    abortController?.abort();
     await this.recordRun(cancelled);
+    abortController?.abort();
 
     return cancelled;
   }
@@ -202,7 +257,7 @@ export class TestRunService {
       });
       const current = await this.getRun(runId);
 
-      if (!current || current.status === 'cancelled') {
+      if (!current || current.status === 'cancelled' || this.cancelledRunIds.has(runId)) {
         return;
       }
 
@@ -216,7 +271,7 @@ export class TestRunService {
     } catch (error) {
       const current = await this.getRun(runId);
 
-      if (!current || current.status === 'cancelled') {
+      if (!current || current.status === 'cancelled' || this.cancelledRunIds.has(runId)) {
         return;
       }
 
@@ -227,6 +282,7 @@ export class TestRunService {
       });
     } finally {
       this.abortControllers.delete(runId);
+      this.cancelledRunIds.delete(runId);
     }
   }
 

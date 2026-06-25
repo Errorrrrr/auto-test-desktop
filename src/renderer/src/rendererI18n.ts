@@ -107,6 +107,7 @@ const EXACT_ZH: Record<string, string> = {
   'Enter an Agent instruction.': '请输入 Agent 指令。',
   'Exporting Markdown report.': '正在导出 Markdown 报告。',
   'Import a valid Maestro test case.': '请导入有效的 Maestro 测试用例。',
+  'Importing through the task workspace API.': '正在通过任务工作区 API 导入。',
   'Importing through the preload case API.': '正在通过 preload 用例 API 导入。',
   'Local agent adapter is reserved for the next implementation task.':
     '本地 Agent 适配器预留给下一阶段实现。',
@@ -150,8 +151,16 @@ const EXACT_ZH: Record<string, string> = {
   'Select a connected Android or iOS device.': '请选择已连接的 Android 或 iOS 设备。',
   'Selected device is not connected for execution.': '所选设备未连接，无法执行。',
   'Sending Agent instruction and starting the local run.': '正在发送 Agent 指令并启动本地运行。',
+  'Starting the task-scoped local run.': '正在启动任务级本地运行。',
   'Supported formats: .yaml, .yml.': '支持格式：.yaml、.yml。',
   'Supported formats: .yaml, .yml. Maximum size: 25 MB.': '支持格式：.yaml、.yml。最大 25 MB。',
+  'Task import did not produce a test case.': '任务导入未生成测试用例。',
+  'Task input is required before execution.': '执行前需要配置任务输入。',
+  'Task report generation requires the Electron main process.':
+    '任务报告生成需要 Electron 主进程。',
+  'Task-scoped imports require the Electron main process.':
+    '任务级导入需要 Electron 主进程。',
+  'Task execution requires the Electron main process.': '任务执行需要 Electron 主进程。',
   'Test case source was not found.': '未找到测试用例源文件。',
   'The selected file is empty.': '所选文件为空。',
   'Unexpected local runtime error.': '本地运行时出现异常。',
@@ -198,12 +207,17 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
     [/^Run (.+) finished as (.+)\.$/, (match) => `运行 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) is (.+)\.$/, (match) => `运行 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) was not found\.$/, (match) => `未找到运行 ${match[1]}。`],
+    [/^Task (.+) has already been started\.$/, (match) => `任务 ${match[1]} 已经开始。`],
+    [/^Task (.+) is already (.+)\.$/, (match) => `任务 ${match[1]} 已经是 ${localizeStatus(match[2], language)} 状态。`],
+    [/^Task (.+) finished as (.+)\.$/, (match) => `任务 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
+    [/^Task (.+) is (.+)\.$/, (match) => `任务 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
     [/^Test case (.+) was not found\.$/, (match) => `未找到测试用例 ${match[1]}。`],
     [/^Test case is (.+); max upload size is (.+)\.$/, (match) => `测试用例大小为 ${match[1]}，上传上限为 ${match[2]}。`],
     [/^Test case source was not found: (.+)$/, (match) => `未找到测试用例源文件：${match[1]}`],
     [/^Test report for (.+)$/, (match) => `测试报告：${match[1]}`],
     [/^Viewer responded with HTTP (\d+)\.$/, (match) => `Viewer 返回 HTTP ${match[1]}。`],
     [/^Viewer responded with HTTP (\d+) (.+)$/, (match) => `Viewer 返回 HTTP ${match[1]} ${match[2]}`],
+    [/^(.+) case imported into (.+)\.$/, (match) => `${match[1]} 用例已导入到 ${match[2]}。`],
     [/^(.+) case imported\.$/, (match) => `${match[1]} 用例已导入。`]
   ];
 
@@ -298,6 +312,7 @@ export const COPY = {
       imported: '导入时间',
       localTarget: '本地地址',
       run: '运行',
+      task: '任务',
       target: '目标',
       updated: '更新时间'
     },
@@ -331,6 +346,7 @@ export const COPY = {
         `${getViewerSourceLabel(source, 'zh')} URL：${url}`,
       viewerConfigLoading: '正在加载 Viewer 配置',
       notLoaded: '未加载',
+      notSelected: '未选择',
       notStarted: '未开始',
       selectedDevice: '所选设备'
     },
@@ -415,6 +431,7 @@ export const COPY = {
       imported: 'Imported',
       localTarget: 'Local target',
       run: 'Run',
+      task: 'Task',
       target: 'Target',
       updated: 'Updated'
     },
@@ -447,6 +464,7 @@ export const COPY = {
       viewerConfig: (source: ViewerConfigSource, url: string) => `${source} URL: ${url}`,
       viewerConfigLoading: 'Loading viewer config',
       notLoaded: 'Not loaded',
+      notSelected: 'Not selected',
       notStarted: 'not started',
       selectedDevice: 'selected device'
     },
