@@ -132,6 +132,20 @@ function createEnvironment(overrides: Partial<EnvironmentStatus> = {}): Environm
 }
 
 describe('workbench run readiness', () => {
+  it('blocks execution until a test task exists', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: null,
+      prompt: 'Generate a login smoke flow'
+    });
+
+    expect(readiness.canStart).toBe(false);
+    expect(readiness.reasons).toContain('Create a test task before execution.');
+    expect(readiness.inputMode).toBe('natural_language');
+  });
+
   it('blocks runs when no connected Android or iOS device is selected', () => {
     const readiness = getRunReadiness({
       environment: createEnvironment({

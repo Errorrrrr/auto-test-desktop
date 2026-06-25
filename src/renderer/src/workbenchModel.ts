@@ -206,6 +206,10 @@ export function getRunReadiness(input: {
     reasons.push('Runtime status is still loading.');
   }
 
+  if (!input.task) {
+    reasons.push('Create a test task before execution.');
+  }
+
   if (!selectedDevice) {
     reasons.push('Select a connected Android or iOS device.');
   } else if (!isExecutableDevice(selectedDevice)) {

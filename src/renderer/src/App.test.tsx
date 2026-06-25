@@ -45,6 +45,8 @@ describe('app shell scrolling', () => {
       const html = renderToStaticMarkup(<App />);
 
       expect(html).toContain('自动化测试工作台');
+      expect(html).toContain('创建测试任务');
+      expect(html).toContain('上传用例或自然语言');
       expect(html).toContain('中文');
       expect(html).toContain('English');
       expect(html).toContain('刷新');
@@ -82,6 +84,24 @@ describe('app shell scrolling', () => {
       expect(html).toContain('<aside class="sidebar"');
       expect(html).toContain('<section class="workspace">');
       expect(html.indexOf('class="sidebar"')).toBeLessThan(html.indexOf('class="workspace"'));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('renders the user-approved task flow before the work panels', () => {
+    vi.stubGlobal('window', { appAutoTest: undefined });
+
+    try {
+      const html = renderToStaticMarkup(<App />);
+
+      expect(html).toContain('aria-label="测试流程"');
+      expect(html).toContain('创建测试任务');
+      expect(html).toContain('设备');
+      expect(html).toContain('上传用例或自然语言');
+      expect(html).toContain('执行测试');
+      expect(html).toContain('报告');
+      expect(html.indexOf('class="flow-strip"')).toBeLessThan(html.indexOf('id="task"'));
     } finally {
       vi.unstubAllGlobals();
     }
