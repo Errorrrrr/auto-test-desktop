@@ -5,11 +5,32 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import type { DeviceInfo, TaskReport } from '../../shared/types';
-import { App, DeviceListPanel, ReportPanel, openAllowedViewerUrl } from './App';
+import type { DeviceInfo, TaskReport, TestTask } from '../../shared/types';
+import { App, DeviceListPanel, ReportPanel, TaskWorkspacePanel, openAllowedViewerUrl } from './App';
 
 const rendererStyles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+
+function createTask(overrides: Partial<TestTask> = {}): TestTask {
+  return {
+    id: 'task-1',
+    name: 'Login smoke',
+    description: 'Validate login',
+    status: 'ready',
+    input: {
+      mode: 'natural_language',
+      naturalLanguage: {
+        prompt: 'Run login smoke',
+        updatedAt: '2026-06-25T02:00:00.000Z'
+      },
+      blockers: []
+    },
+    workspacePath: '/tmp/task-1',
+    createdAt: '2026-06-25T01:00:00.000Z',
+    updatedAt: '2026-06-25T02:00:00.000Z',
+    ...overrides
+  };
+}
 
 describe('viewer open action', () => {
   it('opens only local viewer URLs from the renderer', () => {
@@ -151,6 +172,76 @@ describe('app shell scrolling', () => {
 });
 
 describe('workbench panels', () => {
+  it('renders the task menu as a list plus selected detail workspace', () => {
+    const olderTask = createTask({
+      id: 'task-login',
+      name: 'Login smoke',
+      latestRunId: 'run-login',
+      deviceId: 'android-1',
+      deviceSnapshot: {
+        id: 'android-1',
+        name: 'Pixel 8',
+        platform: 'android',
+        type: 'emulator',
+        connected: true
+      }
+    });
+    const selectedTask = createTask({
+      id: 'task-checkout',
+      name: 'Checkout regression',
+      status: 'draft',
+      input: {
+        mode: 'empty',
+        blockers: ['Task input is required before execution.']
+      },
+      workspacePath: '/tmp/task-checkout',
+      createdAt: '2026-06-25T03:00:00.000Z',
+      updatedAt: '2026-06-25T03:00:00.000Z'
+    });
+
+    const html = renderToStaticMarkup(
+      <TaskWorkspacePanel
+        currentTask={selectedTask}
+        language="en"
+        onCreateTask={() => undefined}
+        onNavigate={() => undefined}
+        onSelectTask={() => undefined}
+        onTaskDescriptionChange={() => undefined}
+        onTaskNameChange={() => undefined}
+        taskAction={{
+          status: 'success',
+          detail: 'Task task-checkout is draft.'
+        }}
+        taskDescription=""
+        taskName=""
+        tasks={[olderTask, selectedTask]}
+      />
+    );
+
+    expect(html).toContain('class="task-workspace-layout"');
+    expect(html).toContain('class="panel task-list-panel"');
+    expect(html).toContain('class="panel task-detail-panel"');
+    expect(html).toContain('data-task-id="task-login"');
+    expect(html).toContain('data-task-id="task-checkout"');
+    expect(html).toContain('Checkout regression');
+    expect(html).toMatch(/aria-pressed="true"[^>]*data-task-id="task-checkout"/);
+    expect(html).toContain('data-page-link="devices"');
+    expect(html).toContain('data-page-link="input"');
+    expect(html).toContain('data-page-link="run"');
+    expect(html).toContain('data-page-link="report"');
+    expect(html).not.toContain('run-login');
+    expect(html).not.toContain('Pixel 8');
+  });
+
+  it('keeps task state partitioned by selected task id in the renderer source', () => {
+    expect(appSource).toContain('taskWorkspaceById');
+    expect(appSource).toContain('updateTaskWorkspaceState');
+    expect(appSource).toContain('selectedTaskId');
+    expect(appSource).not.toContain('const [selectedDeviceId, setSelectedDeviceId]');
+    expect(appSource).not.toContain('const [prompt, setPrompt]');
+    expect(appSource).not.toContain('const [report, setReport]');
+  });
+
   it('keeps the renderer workflow on task-scoped APIs instead of legacy run APIs', () => {
     expect(appSource).toContain('api.tasks.importCase');
     expect(appSource).toContain('api.tasks.start');

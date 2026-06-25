@@ -17,10 +17,12 @@ import {
   getDeviceInspectionSummary,
   getPreferredDeviceId,
   getRunReadiness,
+  getSelectedTaskAfterRefresh,
   isStartableDevice,
   isVirtualDevice,
   mapDeviceStartResultToAction,
   mapViewerProbeResult,
+  upsertTaskList,
   validateCaseFile,
   validateViewerUrl
 } from './workbenchModel';
@@ -252,6 +254,48 @@ describe('workbench task refresh', () => {
     });
 
     expect(getCurrentTaskAfterRefresh(activeTask, [newerTask])).toEqual(activeTask);
+  });
+
+  it('keeps the selected task id but uses refreshed task fields', () => {
+    const refreshedSelectedTask = createTask({
+      id: 'task-selected',
+      name: 'Selected after refresh',
+      status: 'running',
+      latestRunId: 'run-selected',
+      updatedAt: '2026-06-25T03:20:00.000Z'
+    });
+    const newerTask = createTask({
+      id: 'task-newer',
+      name: 'Newer task',
+      updatedAt: '2026-06-25T03:25:00.000Z'
+    });
+
+    expect(getSelectedTaskAfterRefresh('task-selected', [newerTask, refreshedSelectedTask])).toEqual(
+      refreshedSelectedTask
+    );
+  });
+
+  it('upserts changed tasks and keeps the task list ordered by recency', () => {
+    const olderTask = createTask({
+      id: 'task-older',
+      name: 'Older task',
+      updatedAt: '2026-06-25T03:05:00.000Z'
+    });
+    const currentTask = createTask({
+      id: 'task-current',
+      name: 'Current task',
+      updatedAt: '2026-06-25T03:15:00.000Z'
+    });
+    const updatedOlderTask = createTask({
+      id: 'task-older',
+      name: 'Older task after import',
+      updatedAt: '2026-06-25T03:30:00.000Z'
+    });
+
+    expect(upsertTaskList([currentTask, olderTask], updatedOlderTask)).toEqual([
+      updatedOlderTask,
+      currentTask
+    ]);
   });
 });
 

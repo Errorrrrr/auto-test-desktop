@@ -50,11 +50,11 @@ import {
   getDeviceInspectionSummary,
   formatStatusLabel,
   getErrorMessage,
-  getCurrentTaskAfterRefresh,
   getExecutableDevices,
   getPreferredDeviceId,
   getReportFormatLabel,
   getRunReadiness,
+  getSelectedTaskAfterRefresh,
   getSelectedDevice,
   getStatusTone,
   isExecutableDevice,
@@ -62,6 +62,7 @@ import {
   mapDeviceStartResultToAction,
   mapViewerProbeResult,
   normalizeViewerInput,
+  upsertTaskList,
   validateCaseFile,
   validateViewerUrl
 } from './workbenchModel';
@@ -77,12 +78,48 @@ type DeviceActionState = RunActionState & {
   deviceId?: string;
 };
 
+type TaskWorkspaceState = {
+  selectedDeviceId: string;
+  prompt: string;
+  uploadState: UploadState;
+  runAction: RunActionState;
+  reportExport: RunActionState;
+  report: TaskReport | null;
+  agentMessages: AgentMessage[];
+};
+
 type MenuPage = 'overview' | 'task' | 'devices' | 'input' | 'run' | 'report' | 'viewer';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 const RUN_STATUS_POLL_INTERVAL_MS = 1_000;
 const RUN_STATUS_MAX_POLLS = 120;
+
+function createIdleRunAction(): RunActionState {
+  return {
+    status: 'idle',
+    detail: 'No run has been started.'
+  };
+}
+
+function createIdleReportExportAction(): RunActionState {
+  return {
+    status: 'idle',
+    detail: 'Report has not been exported.'
+  };
+}
+
+function createInitialTaskWorkspaceState(task?: TestTask): TaskWorkspaceState {
+  return {
+    selectedDeviceId: task?.deviceId ?? '',
+    prompt: task?.input.naturalLanguage?.prompt ?? '',
+    uploadState: createInitialUploadState(),
+    runAction: createIdleRunAction(),
+    reportExport: createIdleReportExportAction(),
+    report: null,
+    agentMessages: []
+  };
+}
 
 function isTerminalTaskStatus(status: TestTask['status']): boolean {
   return TERMINAL_TASK_STATUSES.has(status);
@@ -607,6 +644,211 @@ export function ReportPanel({
   );
 }
 
+export function TaskWorkspacePanel({
+  currentTask,
+  language = 'en',
+  onCreateTask,
+  onNavigate,
+  onSelectTask,
+  onTaskDescriptionChange,
+  onTaskNameChange,
+  taskAction,
+  taskDescription,
+  taskName,
+  tasks
+}: {
+  currentTask: TestTask | null;
+  language?: Language;
+  onCreateTask: (event: FormEvent<HTMLFormElement>) => void;
+  onNavigate: (page: MenuPage) => void;
+  onSelectTask: (taskId: string) => void;
+  onTaskDescriptionChange: (value: string) => void;
+  onTaskNameChange: (value: string) => void;
+  taskAction: RunActionState;
+  taskDescription: string;
+  taskName: string;
+  tasks: TestTask[];
+}): ReactElement {
+  const copy = COPY[language];
+  const detailLinks: Array<{
+    page: Extract<MenuPage, 'devices' | 'input' | 'run' | 'report'>;
+    label: string;
+    icon: ReactElement;
+  }> = [
+    {
+      page: 'devices',
+      label: copy.nav.devices,
+      icon: <Smartphone size={16} aria-hidden="true" />
+    },
+    {
+      page: 'input',
+      label: copy.nav.input,
+      icon: <UploadCloud size={16} aria-hidden="true" />
+    },
+    {
+      page: 'run',
+      label: copy.nav.run,
+      icon: <Play size={16} aria-hidden="true" />
+    },
+    {
+      page: 'report',
+      label: copy.nav.report,
+      icon: <FileText size={16} aria-hidden="true" />
+    }
+  ];
+
+  return (
+    <section className="task-workspace-layout" id="task">
+      <article className="panel task-list-panel">
+        <div className="panel-heading split">
+          <div>
+            <ClipboardList size={20} aria-hidden="true" />
+            <h2>{copy.titles.taskList}</h2>
+          </div>
+          <StatusPill status={currentTask?.status ?? taskAction.status} language={language} />
+        </div>
+
+        <form className="task-form" onSubmit={onCreateTask}>
+          <label className="field-label" htmlFor="task-name">
+            {copy.fields.name}
+          </label>
+          <input
+            id="task-name"
+            className="text-input"
+            value={taskName}
+            onChange={(event) => onTaskNameChange(event.target.value)}
+            placeholder={copy.copy.taskNamePlaceholder}
+          />
+          <label className="field-label" htmlFor="task-description">
+            {copy.fields.description}
+          </label>
+          <textarea
+            id="task-description"
+            className="text-input task-description-input"
+            value={taskDescription}
+            onChange={(event) => onTaskDescriptionChange(event.target.value)}
+            placeholder={copy.copy.taskDescriptionPlaceholder}
+          />
+          <button
+            className="primary-button"
+            disabled={taskAction.status === 'busy'}
+            type="submit"
+          >
+            {taskAction.status === 'busy' ? (
+              <Loader2 className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <ClipboardList size={18} aria-hidden="true" />
+            )}
+            {copy.actions.createTask}
+          </button>
+        </form>
+
+        <p className={taskAction.status === 'error' ? 'validation-message' : 'muted'}>
+          {localizeText(taskAction.detail, language)}
+        </p>
+
+        {tasks.length ? (
+          <ol className="task-list" aria-label={copy.titles.taskList}>
+            {tasks.map((task) => {
+              const selected = currentTask?.id === task.id;
+
+              return (
+                <li key={task.id}>
+                  <button
+                    className={selected ? 'task-list-item active' : 'task-list-item'}
+                    type="button"
+                    aria-pressed={selected}
+                    data-task-id={task.id}
+                    onClick={() => onSelectTask(task.id)}
+                  >
+                    <span className="task-list-copy">
+                      <strong>{task.name}</strong>
+                      <small>{formatDateTime(task.updatedAt, language)}</small>
+                    </span>
+                    <StatusPill status={task.status} language={language} />
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <div className="empty-state">
+            <ClipboardList aria-hidden="true" size={20} />
+            <div>
+              <strong>{copy.empty.noTasksTitle}</strong>
+              <span>{copy.empty.noTasksDetail}</span>
+            </div>
+          </div>
+        )}
+      </article>
+
+      <article className="panel task-detail-panel">
+        <div className="panel-heading split">
+          <div>
+            <Activity size={20} aria-hidden="true" />
+            <h2>{currentTask ? currentTask.name : copy.titles.taskDetailWorkspace}</h2>
+          </div>
+          <StatusPill status={currentTask?.status ?? 'idle'} language={language} />
+        </div>
+
+        {currentTask ? (
+          <>
+            {currentTask.description ? <p>{currentTask.description}</p> : null}
+            <dl className="metric-grid">
+              <div>
+                <dt>{copy.fields.task}</dt>
+                <dd>{currentTask.id}</dd>
+              </div>
+              <div>
+                <dt>{copy.fields.status}</dt>
+                <dd>{formatStatusLabel(currentTask.status, language)}</dd>
+              </div>
+              <div>
+                <dt>{copy.fields.input}</dt>
+                <dd>{formatStatusLabel(currentTask.input.mode, language)}</dd>
+              </div>
+              <div>
+                <dt>{copy.fields.created}</dt>
+                <dd>{formatDateTime(currentTask.createdAt, language)}</dd>
+              </div>
+              <div>
+                <dt>{copy.fields.run}</dt>
+                <dd>{currentTask.latestRunId ?? copy.runtime.notStarted}</dd>
+              </div>
+              <div>
+                <dt>{copy.fields.device}</dt>
+                <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
+              </div>
+            </dl>
+            <div className="action-row task-detail-links">
+              {detailLinks.map((link) => (
+                <button
+                  key={link.page}
+                  className="icon-button compact-button"
+                  data-page-link={link.page}
+                  type="button"
+                  onClick={() => onNavigate(link.page)}
+                >
+                  {link.icon}
+                  {link.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">
+            <ClipboardList aria-hidden="true" size={20} />
+            <div>
+              <strong>{copy.empty.noSelectedTaskTitle}</strong>
+              <span>{copy.empty.noSelectedTaskDetail}</span>
+            </div>
+          </div>
+        )}
+      </article>
+    </section>
+  );
+}
+
 export function App(): ReactElement {
   const [language, setLanguage] = useState<Language>(() => readStoredLanguage());
   const [activePage, setActivePage] = useState<MenuPage>('overview');
@@ -615,10 +857,9 @@ export function App(): ReactElement {
   const [viewerConfig, setViewerConfig] = useState<ViewerConfig | null>(null);
   const [viewerUrl, setViewerUrl] = useState(getViewerConfig({}).url);
   const [viewerProbe, setViewerProbe] = useState<ViewerProbeState>(() => createInitialViewerProbeState());
-  const [selectedDeviceId, setSelectedDeviceId] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [uploadState, setUploadState] = useState<UploadState>(() => createInitialUploadState());
-  const [currentTask, setCurrentTask] = useState<TestTask | null>(null);
+  const [tasks, setTasks] = useState<TestTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+  const [taskWorkspaceById, setTaskWorkspaceById] = useState<Record<string, TaskWorkspaceState>>({});
   const [taskName, setTaskName] = useState('');
   const [taskDescription, setTaskDescription] = useState('');
   const [taskAction, setTaskAction] = useState<RunActionState>({
@@ -626,7 +867,6 @@ export function App(): ReactElement {
     detail: 'Task has not been created.'
   });
   const [agentSession] = useState<AgentSession | null>(null);
-  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [runtimeState, setRuntimeState] = useState<RunActionState>({
     status: 'idle',
     detail: 'Runtime status has not been refreshed yet.'
@@ -635,18 +875,23 @@ export function App(): ReactElement {
     status: 'idle',
     detail: 'Local device discovery has not been checked yet.'
   });
-  const [runAction, setRunAction] = useState<RunActionState>({
-    status: 'idle',
-    detail: 'No run has been started.'
-  });
-  const [reportExport, setReportExport] = useState<RunActionState>({
-    status: 'idle',
-    detail: 'Report has not been exported.'
-  });
-  const [report, setReport] = useState<TaskReport | null>(null);
 
   const copy = COPY[language];
   const api = useMemo(() => getApi(), []);
+  const currentTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
+    [selectedTaskId, tasks]
+  );
+  const currentTaskWorkspace = currentTask
+    ? taskWorkspaceById[currentTask.id] ?? createInitialTaskWorkspaceState(currentTask)
+    : null;
+  const selectedDeviceId = currentTaskWorkspace?.selectedDeviceId ?? '';
+  const prompt = currentTaskWorkspace?.prompt ?? '';
+  const uploadState = currentTaskWorkspace?.uploadState ?? createInitialUploadState();
+  const runAction = currentTaskWorkspace?.runAction ?? createIdleRunAction();
+  const reportExport = currentTaskWorkspace?.reportExport ?? createIdleReportExportAction();
+  const report = currentTaskWorkspace?.report ?? null;
+  const agentMessages = currentTaskWorkspace?.agentMessages ?? [];
   const readiness = useMemo(
     () =>
       getRunReadiness({
@@ -798,6 +1043,95 @@ export function App(): ReactElement {
     return Boolean(task && !task.latestRunId && !isActiveTaskStatus(task.status) && !isTerminalTaskStatus(task.status));
   }
 
+  function mergeTaskWorkspaceState(
+    previous: TaskWorkspaceState | undefined,
+    task: TestTask
+  ): TaskWorkspaceState {
+    const fallback = previous ?? createInitialTaskWorkspaceState(task);
+
+    return {
+      ...fallback,
+      selectedDeviceId: fallback.selectedDeviceId || task.deviceId || '',
+      prompt: fallback.prompt || task.input.naturalLanguage?.prompt || ''
+    };
+  }
+
+  function updateTaskWorkspaceState(
+    taskId: string,
+    updater: Partial<TaskWorkspaceState> | ((previous: TaskWorkspaceState) => TaskWorkspaceState)
+  ): void {
+    setTaskWorkspaceById((current) => {
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      const previous = current[taskId] ?? createInitialTaskWorkspaceState(task);
+      const next = typeof updater === 'function' ? updater(previous) : { ...previous, ...updater };
+
+      return {
+        ...current,
+        [taskId]: next
+      };
+    });
+  }
+
+  function updateCurrentTaskWorkspaceState(
+    updater: Partial<TaskWorkspaceState> | ((previous: TaskWorkspaceState) => TaskWorkspaceState)
+  ): void {
+    if (!currentTask) {
+      return;
+    }
+
+    updateTaskWorkspaceState(currentTask.id, updater);
+  }
+
+  function upsertTask(task: TestTask, options: { select?: boolean } = {}): void {
+    setTasks((currentTasks) => upsertTaskList(currentTasks, task));
+    setTaskWorkspaceById((current) => ({
+      ...current,
+      [task.id]: mergeTaskWorkspaceState(current[task.id], task)
+    }));
+
+    if (options.select) {
+      setSelectedTaskId(task.id);
+    }
+  }
+
+  function hydrateTaskWorkspaces(
+    refreshedTasks: TestTask[],
+    selectedTask: TestTask | null,
+    nextDevices: DeviceInfo[]
+  ): void {
+    setTaskWorkspaceById((current) => {
+      const next = { ...current };
+
+      for (const task of refreshedTasks) {
+        next[task.id] = mergeTaskWorkspaceState(next[task.id], task);
+      }
+
+      if (selectedTask) {
+        const selectedWorkspace = next[selectedTask.id] ?? createInitialTaskWorkspaceState(selectedTask);
+        next[selectedTask.id] = {
+          ...selectedWorkspace,
+          selectedDeviceId: getPreferredDeviceId(
+            nextDevices,
+            selectedWorkspace.selectedDeviceId || selectedTask.deviceId || ''
+          )
+        };
+      }
+
+      return next;
+    });
+  }
+
+  function handleSelectTask(taskId: string): void {
+    setSelectedTaskId(taskId);
+    setActivePage('task');
+  }
+
+  function handleSelectDevice(deviceId: string): void {
+    updateCurrentTaskWorkspaceState({
+      selectedDeviceId: deviceId
+    });
+  }
+
   async function syncTaskPrompt(task: TestTask, nextPrompt: string): Promise<TestTask> {
     const normalizedPrompt = nextPrompt.trim();
     const currentPrompt = task.input.naturalLanguage?.prompt ?? '';
@@ -811,7 +1145,10 @@ export function App(): ReactElement {
       ...(normalizedPrompt ? { prompt: normalizedPrompt } : {})
     });
 
-    setCurrentTask(updatedTask);
+    upsertTask(updatedTask);
+    updateTaskWorkspaceState(updatedTask.id, {
+      prompt: updatedTask.input.naturalLanguage?.prompt ?? ''
+    });
     return updatedTask;
   }
 
@@ -840,23 +1177,11 @@ export function App(): ReactElement {
         ...(description ? { description } : {})
       });
 
-      setCurrentTask(task);
+      upsertTask(task, { select: true });
       setTaskAction({
         status: 'success',
         detail: `Task ${task.id} created.`
       });
-      setPrompt('');
-      setUploadState(createInitialUploadState());
-      setReport(null);
-      setReportExport({
-        status: 'idle',
-        detail: 'Report has not been exported.'
-      });
-      setRunAction({
-        status: 'idle',
-        detail: 'No run has been started.'
-      });
-      setAgentMessages([]);
       setTaskName('');
       setTaskDescription('');
     } catch (error) {
@@ -882,17 +1207,15 @@ export function App(): ReactElement {
         api.viewer.getConfig(),
         api.tasks.list()
       ]);
-      const nextTask = getCurrentTaskAfterRefresh(currentTask, tasks);
+      const nextTask = getSelectedTaskAfterRefresh(selectedTaskId, tasks);
 
       setEnvironment(nextEnvironment);
       setDevices(nextDevices);
       setViewerConfig(nextViewerConfig);
       setViewerUrl(nextViewerConfig.url);
-      setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
-      setCurrentTask(nextTask);
-      if (nextTask?.input.naturalLanguage?.prompt) {
-        setPrompt((value) => value || nextTask.input.naturalLanguage?.prompt || '');
-      }
+      setTasks(tasks);
+      setSelectedTaskId(nextTask?.id ?? '');
+      hydrateTaskWorkspaces(tasks, nextTask, nextDevices);
       if (nextTask) {
         setTaskAction({
           status: 'success',
@@ -926,7 +1249,12 @@ export function App(): ReactElement {
       const summary = getDeviceInspectionSummary(nextDevices);
 
       setDevices(nextDevices);
-      setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
+      if (currentTask) {
+        updateTaskWorkspaceState(currentTask.id, (current) => ({
+          ...current,
+          selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
+        }));
+      }
       setDeviceAction({
         status: 'success',
         detail: `Found ${summary.totalSupported} supported device(s): ${summary.connected} connected, ${summary.virtual} virtual, ${summary.physical} physical.`
@@ -962,7 +1290,12 @@ export function App(): ReactElement {
       ) : await api.devices.list();
 
       setDevices(nextDevices);
-      setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
+      if (currentTask) {
+        updateTaskWorkspaceState(currentTask.id, (current) => ({
+          ...current,
+          selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
+        }));
+      }
       setDeviceAction(mapDeviceStartResultToAction(result, device.name));
     } catch (error) {
       setDeviceAction({
@@ -1021,35 +1354,40 @@ export function App(): ReactElement {
     const fileCandidate = file as File & { path?: string };
     const validation = validateCaseFile(fileCandidate);
 
-    setReport(null);
-    setReportExport({
-      status: 'idle',
-      detail: 'Report has not been exported.'
+    updateCurrentTaskWorkspaceState({
+      report: null,
+      reportExport: createIdleReportExportAction()
     });
 
     if (!canReuseTask(currentTask)) {
-      setUploadState({
-        name: file.name,
-        status: 'rejected',
-        detail: 'Create a test task before uploading a case.'
+      updateCurrentTaskWorkspaceState({
+        uploadState: {
+          name: file.name,
+          status: 'rejected',
+          detail: 'Create a test task before uploading a case.'
+        }
       });
       event.target.value = '';
       return;
     }
 
     if (!validation.valid) {
-      setUploadState({
-        name: file.name,
-        status: 'rejected',
-        detail: validation.detail
+      updateCurrentTaskWorkspaceState({
+        uploadState: {
+          name: file.name,
+          status: 'rejected',
+          detail: validation.detail
+        }
       });
       return;
     }
 
-    setUploadState({
-      name: file.name,
-      status: 'importing',
-      detail: 'Importing through the task workspace API.'
+    updateCurrentTaskWorkspaceState({
+      uploadState: {
+        name: file.name,
+        status: 'importing',
+        detail: 'Importing through the task workspace API.'
+      }
     });
 
     try {
@@ -1060,19 +1398,23 @@ export function App(): ReactElement {
       });
       const taskCase = updatedTask.input.testCase;
 
-      setCurrentTask(updatedTask);
-      setUploadState({
-        name: taskCase?.name ?? file.name,
-        status: taskCase ? 'accepted' : 'rejected',
-        detail: taskCase
-          ? `${taskCase.format.toUpperCase()} case imported into ${updatedTask.name}.`
-          : updatedTask.failureReason ?? 'Task import did not produce a test case.'
+      upsertTask(updatedTask);
+      updateTaskWorkspaceState(updatedTask.id, {
+        uploadState: {
+          name: taskCase?.name ?? file.name,
+          status: taskCase ? 'accepted' : 'rejected',
+          detail: taskCase
+            ? `${taskCase.format.toUpperCase()} case imported into ${updatedTask.name}.`
+            : updatedTask.failureReason ?? 'Task import did not produce a test case.'
+        }
       });
     } catch (error) {
-      setUploadState({
-        name: file.name,
-        status: 'rejected',
-        detail: getErrorMessage(error)
+      updateCurrentTaskWorkspaceState({
+        uploadState: {
+          name: file.name,
+          status: 'rejected',
+          detail: getErrorMessage(error)
+        }
       });
     }
   }
@@ -1082,53 +1424,69 @@ export function App(): ReactElement {
       const latestTask = await api.tasks.get(taskId);
       const latestReport = await api.tasks.getReport(taskId);
 
-      setCurrentTask(latestTask);
-      setReport(latestReport);
+      upsertTask(latestTask);
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        report: latestReport
+      }));
 
       if (isTerminalTaskStatus(latestTask.status)) {
         const completedWithoutFailure =
           latestTask.status === 'succeeded' || latestTask.status === 'cancelled';
 
-        setRunAction({
-          status: completedWithoutFailure ? 'success' : 'error',
-          detail: `Task ${latestTask.id} finished as ${formatStatusLabel(latestTask.status, 'en')}.`
-        });
+        updateTaskWorkspaceState(taskId, (current) => ({
+          ...current,
+          runAction: {
+            status: completedWithoutFailure ? 'success' : 'error',
+            detail: `Task ${latestTask.id} finished as ${formatStatusLabel(latestTask.status, 'en')}.`
+          }
+        }));
         return;
       }
 
-      setRunAction({
-        status: 'busy',
-        detail: `Task ${latestTask.id} is ${formatStatusLabel(latestTask.status, 'en')}.`
-      });
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        runAction: {
+          status: 'busy',
+          detail: `Task ${latestTask.id} is ${formatStatusLabel(latestTask.status, 'en')}.`
+        }
+      }));
 
       await new Promise((resolve) => {
         window.setTimeout(resolve, RUN_STATUS_POLL_INTERVAL_MS);
       });
     }
 
-    setRunAction({
-      status: 'error',
-      detail: 'Run status polling timed out before the local runtime reached a terminal state.'
-    });
+    updateTaskWorkspaceState(taskId, (current) => ({
+      ...current,
+      runAction: {
+        status: 'error',
+        detail: 'Run status polling timed out before the local runtime reached a terminal state.'
+      }
+    }));
   }
 
   async function handleStartRun(): Promise<void> {
     if (!readiness.canStart || !readiness.selectedDevice || !currentTask) {
-      setRunAction({
-        status: 'error',
-        detail: readiness.reasons.join(' ')
+      updateCurrentTaskWorkspaceState({
+        runAction: {
+          status: 'error',
+          detail: readiness.reasons.join(' ')
+        }
       });
       return;
     }
 
-    setRunAction({
-      status: 'busy',
-      detail: 'Starting the task-scoped local run.'
-    });
-    setReportExport({
-      status: 'idle',
-      detail: 'Report has not been exported.'
-    });
+    const taskId = currentTask.id;
+
+    updateTaskWorkspaceState(taskId, (current) => ({
+      ...current,
+      runAction: {
+        status: 'busy',
+        detail: 'Starting the task-scoped local run.'
+      },
+      reportExport: createIdleReportExportAction()
+    }));
 
     try {
       const task = await syncTaskPrompt(currentTask, prompt);
@@ -1139,29 +1497,39 @@ export function App(): ReactElement {
       const nextReport = await api.tasks.getReport(startedTask.id);
 
       if (prompt.trim()) {
-        setAgentMessages((messages) => [
-          ...messages,
-          {
-            id: `local-user-${Date.now()}`,
-            sessionId: startedTask.id,
-            role: 'user',
-            content: prompt.trim(),
-            createdAt: new Date().toISOString()
-          }
-        ]);
+        updateTaskWorkspaceState(startedTask.id, (current) => ({
+          ...current,
+          agentMessages: [
+            ...current.agentMessages,
+            {
+              id: `local-user-${Date.now()}`,
+              sessionId: startedTask.id,
+              role: 'user',
+              content: prompt.trim(),
+              createdAt: new Date().toISOString()
+            }
+          ]
+        }));
       }
-      setCurrentTask(startedTask);
-      setReport(nextReport);
-      setRunAction({
-        status: startedTask.status === 'failed' || startedTask.status === 'blocked' ? 'error' : 'success',
-        detail: `Task ${startedTask.id} is ${formatStatusLabel(startedTask.status, 'en')}.`
-      });
+
+      upsertTask(startedTask);
+      updateTaskWorkspaceState(startedTask.id, (current) => ({
+        ...current,
+        report: nextReport,
+        runAction: {
+          status: startedTask.status === 'failed' || startedTask.status === 'blocked' ? 'error' : 'success',
+          detail: `Task ${startedTask.id} is ${formatStatusLabel(startedTask.status, 'en')}.`
+        }
+      }));
       await pollTaskUntilSettled(startedTask.id);
     } catch (error) {
-      setRunAction({
-        status: 'error',
-        detail: getErrorMessage(error)
-      });
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        runAction: {
+          status: 'error',
+          detail: getErrorMessage(error)
+        }
+      }));
     }
   }
 
@@ -1170,26 +1538,37 @@ export function App(): ReactElement {
       return;
     }
 
-    setRunAction({
-      status: 'busy',
-      detail: `Cancelling ${currentTask.id}.`
-    });
+    const taskId = currentTask.id;
+
+    updateTaskWorkspaceState(taskId, (current) => ({
+      ...current,
+      runAction: {
+        status: 'busy',
+        detail: `Cancelling ${currentTask.id}.`
+      }
+    }));
 
     try {
       const cancelledTask = await api.tasks.cancel(currentTask.id);
       const nextReport = await api.tasks.getReport(cancelledTask.id);
 
-      setCurrentTask(cancelledTask);
-      setReport(nextReport);
-      setRunAction({
-        status: 'success',
-        detail: `Task ${cancelledTask.id} is ${formatStatusLabel(cancelledTask.status, 'en')}.`
-      });
+      upsertTask(cancelledTask);
+      updateTaskWorkspaceState(cancelledTask.id, (current) => ({
+        ...current,
+        report: nextReport,
+        runAction: {
+          status: 'success',
+          detail: `Task ${cancelledTask.id} is ${formatStatusLabel(cancelledTask.status, 'en')}.`
+        }
+      }));
     } catch (error) {
-      setRunAction({
-        status: 'error',
-        detail: getErrorMessage(error)
-      });
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        runAction: {
+          status: 'error',
+          detail: getErrorMessage(error)
+        }
+      }));
     }
   }
 
@@ -1198,10 +1577,15 @@ export function App(): ReactElement {
       return;
     }
 
-    setReportExport({
-      status: 'busy',
-      detail: 'Exporting Markdown report.'
-    });
+    const taskId = currentTask.id;
+
+    updateTaskWorkspaceState(taskId, (current) => ({
+      ...current,
+      reportExport: {
+        status: 'busy',
+        detail: 'Exporting Markdown report.'
+      }
+    }));
 
     try {
       const exportedReport = await api.tasks.exportReport({
@@ -1209,18 +1593,24 @@ export function App(): ReactElement {
         format: 'markdown'
       });
 
-      setReport(exportedReport);
-      setReportExport({
-        status: 'success',
-        detail: exportedReport.filePath
-          ? `Markdown exported to ${exportedReport.filePath}.`
-          : 'Markdown report exported.'
-      });
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        report: exportedReport,
+        reportExport: {
+          status: 'success',
+          detail: exportedReport.filePath
+            ? `Markdown exported to ${exportedReport.filePath}.`
+            : 'Markdown report exported.'
+        }
+      }));
     } catch (error) {
-      setReportExport({
-        status: 'error',
-        detail: getErrorMessage(error)
-      });
+      updateTaskWorkspaceState(taskId, (current) => ({
+        ...current,
+        reportExport: {
+          status: 'error',
+          detail: getErrorMessage(error)
+        }
+      }));
     }
   }
 
@@ -1371,83 +1761,19 @@ export function App(): ReactElement {
 
         {activePage === 'task' ? (
           <section className="workspace-page" data-page="task">
-          <article className="panel task-panel" id="task">
-            <div className="panel-heading split">
-              <div>
-                <ClipboardList size={20} aria-hidden="true" />
-                <h2>{copy.titles.createTask}</h2>
-              </div>
-              <StatusPill status={currentTask?.status ?? taskAction.status} language={language} />
-            </div>
-
-            <form className="task-form" onSubmit={(event) => void handleCreateTask(event)}>
-              <label className="field-label" htmlFor="task-name">
-                {copy.fields.name}
-              </label>
-              <input
-                id="task-name"
-                className="text-input"
-                value={taskName}
-                onChange={(event) => setTaskName(event.target.value)}
-                placeholder={copy.copy.taskNamePlaceholder}
-              />
-              <label className="field-label" htmlFor="task-description">
-                {copy.fields.description}
-              </label>
-              <textarea
-                id="task-description"
-                className="text-input task-description-input"
-                value={taskDescription}
-                onChange={(event) => setTaskDescription(event.target.value)}
-                placeholder={copy.copy.taskDescriptionPlaceholder}
-              />
-              <button
-                className="primary-button"
-                disabled={taskAction.status === 'busy'}
-                type="submit"
-              >
-                {taskAction.status === 'busy' ? (
-                  <Loader2 className="spin" size={18} aria-hidden="true" />
-                ) : (
-                  <ClipboardList size={18} aria-hidden="true" />
-                )}
-                {currentTask ? copy.actions.newTask : copy.actions.createTask}
-              </button>
-            </form>
-
-            <p className={taskAction.status === 'error' ? 'validation-message' : 'muted'}>
-              {localizeText(taskAction.detail, language)}
-            </p>
-
-            {currentTask ? (
-              <dl className="metric-grid">
-                <div>
-                  <dt>{copy.fields.task}</dt>
-                  <dd>{currentTask.id}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.status}</dt>
-                  <dd>{formatStatusLabel(currentTask.status, language)}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.input}</dt>
-                  <dd>{formatStatusLabel(currentTask.input.mode, language)}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.created}</dt>
-                  <dd>{formatDateTime(currentTask.createdAt, language)}</dd>
-                </div>
-              </dl>
-            ) : (
-              <div className="empty-state">
-                <ClipboardList aria-hidden="true" size={20} />
-                <div>
-                  <strong>{copy.runtime.noTask}</strong>
-                  <span>{copy.copy.createTaskFirst}</span>
-                </div>
-              </div>
-            )}
-          </article>
+            <TaskWorkspacePanel
+              currentTask={currentTask}
+              language={language}
+              onCreateTask={(event) => void handleCreateTask(event)}
+              onNavigate={setActivePage}
+              onSelectTask={handleSelectTask}
+              onTaskDescriptionChange={setTaskDescription}
+              onTaskNameChange={setTaskName}
+              taskAction={taskAction}
+              taskDescription={taskDescription}
+              taskName={taskName}
+              tasks={tasks}
+            />
           </section>
         ) : null}
 
@@ -1456,7 +1782,7 @@ export function App(): ReactElement {
             <DeviceListPanel
               devices={devices}
               selectedDeviceId={selectedDeviceId}
-              onSelectDevice={setSelectedDeviceId}
+              onSelectDevice={handleSelectDevice}
               onCheckDevices={() => void handleCheckDevices()}
               onStartDevice={(device) => void handleStartDevice(device)}
               deviceAction={deviceAction}
@@ -1511,7 +1837,7 @@ export function App(): ReactElement {
                   className="prompt-input"
                   value={prompt}
                   disabled={!taskEditable}
-                  onChange={(event) => setPrompt(event.target.value)}
+                  onChange={(event) => updateCurrentTaskWorkspaceState({ prompt: event.target.value })}
                   placeholder={copy.copy.promptPlaceholder}
                 />
                 <span className="subtle-line">{copy.copy.promptOnlyLimit}</span>

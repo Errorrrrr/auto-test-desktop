@@ -462,6 +462,70 @@ h2 {
   background: #eef2f7;
 }
 
+.task-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.38fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.task-list-panel,
+.task-detail-panel {
+  min-height: 420px;
+}
+
+.task-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  color: #203047;
+  background: #f8fbff;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.task-list-item.active,
+.task-list-item:hover {
+  border-color: #256d64;
+  background: #f2fbf7;
+}
+
+.task-list-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.task-list-copy strong,
+.task-list-copy small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-list-copy small {
+  color: #627084;
+  font-size: 12px;
+}
+
+.task-detail-links {
+  flex-wrap: wrap;
+}
+
 .field-label {
   color: #39475a;
   font-size: 13px;
@@ -797,7 +861,8 @@ h2 {
   .panel-grid.two,
   .flow-strip,
   .input-method-grid,
-  .menu-card-grid {
+  .menu-card-grid,
+  .task-workspace-layout {
     grid-template-columns: 1fr;
   }
 }

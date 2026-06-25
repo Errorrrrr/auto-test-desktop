@@ -225,6 +225,33 @@ export function getCurrentTaskAfterRefresh(
   return currentTask ?? getMostRecentTask(refreshedTasks) ?? null;
 }
 
+export function getSelectedTaskAfterRefresh(
+  selectedTaskId: string,
+  refreshedTasks: TestTask[]
+): TestTask | null {
+  return (
+    refreshedTasks.find((task) => task.id === selectedTaskId) ??
+    getMostRecentTask(refreshedTasks) ??
+    null
+  );
+}
+
+export function upsertTaskList(tasks: TestTask[], nextTask: TestTask): TestTask[] {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+
+  taskById.set(nextTask.id, nextTask);
+
+  return Array.from(taskById.values()).sort((left, right) => {
+    const timeDiff = getTaskRecencyTime(right) - getTaskRecencyTime(left);
+
+    if (timeDiff !== 0) {
+      return timeDiff;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
+}
+
 export function getRunReadiness(input: {
   environment: EnvironmentStatus | null;
   devices: DeviceInfo[];
