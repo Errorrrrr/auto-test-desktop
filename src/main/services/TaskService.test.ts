@@ -159,6 +159,28 @@ afterEach(async () => {
 });
 
 describe('TaskService', () => {
+  it('lists the most recently updated task first after two task refresh records exist', async () => {
+    const { storage, tasks } = await createTaskServices();
+    const olderTask = await tasks.create({ name: 'Older task' });
+    const latestTask = await tasks.create({ name: 'Latest task' });
+
+    await storage.getTaskStore().upsert({
+      ...olderTask,
+      createdAt: '2026-06-25T03:00:00.000Z',
+      updatedAt: '2026-06-25T03:05:00.000Z'
+    });
+    await storage.getTaskStore().upsert({
+      ...latestTask,
+      createdAt: '2026-06-25T03:10:00.000Z',
+      updatedAt: '2026-06-25T03:15:00.000Z'
+    });
+
+    const [firstTask, secondTask] = await tasks.list();
+
+    expect(firstTask?.id).toBe(latestTask.id);
+    expect(secondTask?.id).toBe(olderTask.id);
+  });
+
   it('imports YAML cases into the task workspace and keeps the task ready', async () => {
     const { rootDir, tasks } = await createTaskServices();
     const sourcePath = join(rootDir, 'smoke.yaml');

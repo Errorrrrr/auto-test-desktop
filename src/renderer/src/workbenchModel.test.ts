@@ -13,7 +13,9 @@ import {
   createCaseImportRequest,
   createReportPlaceholder,
   formatStatusLabel,
+  getCurrentTaskAfterRefresh,
   getDeviceInspectionSummary,
+  getPreferredDeviceId,
   getRunReadiness,
   isStartableDevice,
   isVirtualDevice,
@@ -132,6 +134,20 @@ function createEnvironment(overrides: Partial<EnvironmentStatus> = {}): Environm
 }
 
 describe('workbench run readiness', () => {
+  it('blocks execution until a test task exists', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: null,
+      prompt: 'Generate a login smoke flow'
+    });
+
+    expect(readiness.canStart).toBe(false);
+    expect(readiness.reasons).toContain('Create a test task before execution.');
+    expect(readiness.inputMode).toBe('natural_language');
+  });
+
   it('blocks runs when no connected Android or iOS device is selected', () => {
     const readiness = getRunReadiness({
       environment: createEnvironment({
@@ -199,7 +215,57 @@ describe('workbench run readiness', () => {
   });
 });
 
+describe('workbench task refresh', () => {
+  it('restores the latest task when refresh returns two tasks in manifest order', () => {
+    const olderTask = createTask({
+      id: 'task-older',
+      name: 'Older task',
+      createdAt: '2026-06-25T03:00:00.000Z',
+      updatedAt: '2026-06-25T03:05:00.000Z'
+    });
+    const latestTask = createTask({
+      id: 'task-latest',
+      name: 'Latest task',
+      createdAt: '2026-06-25T03:10:00.000Z',
+      updatedAt: '2026-06-25T03:15:00.000Z',
+      input: {
+        mode: 'natural_language',
+        naturalLanguage: {
+          prompt: 'Run latest smoke test',
+          updatedAt: '2026-06-25T03:15:00.000Z'
+        },
+        blockers: []
+      }
+    });
+
+    expect(getCurrentTaskAfterRefresh(null, [olderTask, latestTask])).toEqual(latestTask);
+  });
+
+  it('keeps an active task selected when refresh returns a newer task', () => {
+    const activeTask = createTask({
+      id: 'task-active',
+      updatedAt: '2026-06-25T03:05:00.000Z'
+    });
+    const newerTask = createTask({
+      id: 'task-newer',
+      updatedAt: '2026-06-25T03:15:00.000Z'
+    });
+
+    expect(getCurrentTaskAfterRefresh(activeTask, [newerTask])).toEqual(activeTask);
+  });
+});
+
 describe('workbench device inspection', () => {
+  it('does not prefer disconnected devices as executable selections', () => {
+    expect(getPreferredDeviceId([disconnectedDevice], '')).toBe('');
+    expect(getPreferredDeviceId([disconnectedDevice, connectedDevice], disconnectedDevice.id)).toBe(
+      connectedDevice.id
+    );
+    expect(getPreferredDeviceId([disconnectedDevice, connectedDevice], connectedDevice.id)).toBe(
+      connectedDevice.id
+    );
+  });
+
   it('counts Android and iOS physical plus virtual devices separately', () => {
     const summary = getDeviceInspectionSummary([
       connectedDevice,

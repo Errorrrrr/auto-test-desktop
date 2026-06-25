@@ -4,6 +4,7 @@ import {
   Ban,
   Cable,
   CheckCircle2,
+  ClipboardList,
   FileText,
   Loader2,
   MessageSquare,
@@ -15,7 +16,7 @@ import {
   Smartphone,
   UploadCloud
 } from 'lucide-react';
-import { ChangeEvent, ReactElement, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, ReactElement, useEffect, useMemo, useState } from 'react';
 
 import { createRuntimeSnapshot } from '../../shared/runtimeSnapshot';
 import type {
@@ -49,6 +50,7 @@ import {
   getDeviceInspectionSummary,
   formatStatusLabel,
   getErrorMessage,
+  getCurrentTaskAfterRefresh,
   getExecutableDevices,
   getPreferredDeviceId,
   getReportFormatLabel,
@@ -614,6 +616,12 @@ export function App(): ReactElement {
   const [prompt, setPrompt] = useState('');
   const [uploadState, setUploadState] = useState<UploadState>(() => createInitialUploadState());
   const [currentTask, setCurrentTask] = useState<TestTask | null>(null);
+  const [taskName, setTaskName] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [taskAction, setTaskAction] = useState<RunActionState>({
+    status: 'idle',
+    detail: 'Task has not been created.'
+  });
   const [agentSession] = useState<AgentSession | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [runtimeState, setRuntimeState] = useState<RunActionState>({
@@ -648,40 +656,47 @@ export function App(): ReactElement {
     [currentTask, devices, environment, prompt, selectedDeviceId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
+  const selectedDeviceCanExecute = Boolean(selectedDevice && isExecutableDevice(selectedDevice));
   const currentTaskCase = currentTask?.input.testCase;
   const runtimeGeneratedAt = environment ? formatDateTime(environment.generatedAt, language) : copy.runtime.notLoaded;
   const trimmedViewerUrl = viewerUrl.trim();
   const canOpenViewer = isAllowedLocalViewerUrl(trimmedViewerUrl);
-
-  function getWorkbenchTaskName(nameHint?: string): string {
-    const trimmedPrompt = prompt.trim();
-
-    if (nameHint) {
-      return `Workbench task - ${nameHint}`;
+  const taskEditable = canReuseTask(currentTask);
+  const flowSteps = [
+    {
+      href: '#task',
+      label: copy.titles.createTask,
+      detail: currentTask ? formatStatusLabel(currentTask.status, language) : copy.runtime.noTask,
+      done: Boolean(currentTask)
+    },
+    {
+      href: '#devices',
+      label: copy.titles.devices,
+      detail: selectedDevice?.name ?? copy.runtime.notSelected,
+      done: selectedDeviceCanExecute
+    },
+    {
+      href: '#input',
+      label: copy.titles.taskInput,
+      detail: formatStatusLabel(readiness.inputMode, language),
+      done: readiness.inputMode !== 'empty'
+    },
+    {
+      href: '#run',
+      label: copy.titles.executeTest,
+      detail: currentTask?.latestRunId ?? copy.runtime.notStarted,
+      done: Boolean(currentTask?.latestRunId)
+    },
+    {
+      href: '#report',
+      label: copy.titles.report,
+      detail: report ? formatStatusLabel(report.status, language) : copy.runtime.notStarted,
+      done: Boolean(report)
     }
-
-    if (trimmedPrompt) {
-      return `Workbench task - ${trimmedPrompt.slice(0, 40)}`;
-    }
-
-    return 'Workbench task';
-  }
+  ];
 
   function canReuseTask(task: TestTask | null): task is TestTask {
     return Boolean(task && !task.latestRunId && !isActiveTaskStatus(task.status) && !isTerminalTaskStatus(task.status));
-  }
-
-  async function ensureEditableTask(nameHint?: string): Promise<TestTask> {
-    if (canReuseTask(currentTask)) {
-      return currentTask;
-    }
-
-    const task = await api.tasks.create({
-      name: getWorkbenchTaskName(nameHint)
-    });
-
-    setCurrentTask(task);
-    return task;
   }
 
   async function syncTaskPrompt(task: TestTask, nextPrompt: string): Promise<TestTask> {
@@ -701,6 +716,58 @@ export function App(): ReactElement {
     return updatedTask;
   }
 
+  async function handleCreateTask(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    const name = taskName.trim();
+    const description = taskDescription.trim();
+
+    if (!name) {
+      setTaskAction({
+        status: 'error',
+        detail: 'Enter a task name.'
+      });
+      return;
+    }
+
+    setTaskAction({
+      status: 'busy',
+      detail: 'Creating test task.'
+    });
+
+    try {
+      const task = await api.tasks.create({
+        name,
+        ...(description ? { description } : {})
+      });
+
+      setCurrentTask(task);
+      setTaskAction({
+        status: 'success',
+        detail: `Task ${task.id} created.`
+      });
+      setPrompt('');
+      setUploadState(createInitialUploadState());
+      setReport(null);
+      setReportExport({
+        status: 'idle',
+        detail: 'Report has not been exported.'
+      });
+      setRunAction({
+        status: 'idle',
+        detail: 'No run has been started.'
+      });
+      setAgentMessages([]);
+      setTaskName('');
+      setTaskDescription('');
+    } catch (error) {
+      setTaskAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
+    }
+  }
+
   useEffect(() => {
     persistLanguage(language);
     document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
@@ -716,16 +783,22 @@ export function App(): ReactElement {
         api.viewer.getConfig(),
         api.tasks.list()
       ]);
-      const mostRecentTask = tasks[0];
+      const nextTask = getCurrentTaskAfterRefresh(currentTask, tasks);
 
       setEnvironment(nextEnvironment);
       setDevices(nextDevices);
       setViewerConfig(nextViewerConfig);
       setViewerUrl(nextViewerConfig.url);
       setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
-      setCurrentTask((task) => task ?? mostRecentTask ?? null);
-      if (mostRecentTask?.input.naturalLanguage?.prompt) {
-        setPrompt((value) => value || mostRecentTask.input.naturalLanguage?.prompt || '');
+      setCurrentTask(nextTask);
+      if (nextTask?.input.naturalLanguage?.prompt) {
+        setPrompt((value) => value || nextTask.input.naturalLanguage?.prompt || '');
+      }
+      if (nextTask) {
+        setTaskAction({
+          status: 'success',
+          detail: `Task ${nextTask.id} is ${formatStatusLabel(nextTask.status, 'en')}.`
+        });
       }
       setRuntimeState({
         status: 'success',
@@ -849,12 +922,21 @@ export function App(): ReactElement {
     const fileCandidate = file as File & { path?: string };
     const validation = validateCaseFile(fileCandidate);
 
-    setCurrentTask((task) => (canReuseTask(task) ? task : null));
     setReport(null);
     setReportExport({
       status: 'idle',
       detail: 'Report has not been exported.'
     });
+
+    if (!canReuseTask(currentTask)) {
+      setUploadState({
+        name: file.name,
+        status: 'rejected',
+        detail: 'Create a test task before uploading a case.'
+      });
+      event.target.value = '';
+      return;
+    }
 
     if (!validation.valid) {
       setUploadState({
@@ -872,7 +954,7 @@ export function App(): ReactElement {
     });
 
     try {
-      const task = await syncTaskPrompt(await ensureEditableTask(file.name), prompt);
+      const task = await syncTaskPrompt(currentTask, prompt);
       const updatedTask = await api.tasks.importCase({
         taskId: task.id,
         ...createCaseImportRequest(fileCandidate)
@@ -932,7 +1014,7 @@ export function App(): ReactElement {
   }
 
   async function handleStartRun(): Promise<void> {
-    if (!readiness.canStart || !readiness.selectedDevice) {
+    if (!readiness.canStart || !readiness.selectedDevice || !currentTask) {
       setRunAction({
         status: 'error',
         detail: readiness.reasons.join(' ')
@@ -950,7 +1032,7 @@ export function App(): ReactElement {
     });
 
     try {
-      const task = await syncTaskPrompt(await ensureEditableTask(), prompt);
+      const task = await syncTaskPrompt(currentTask, prompt);
       const startedTask = await api.tasks.start({
         taskId: task.id,
         deviceId: readiness.selectedDevice.id
@@ -1058,17 +1140,21 @@ export function App(): ReactElement {
             <Activity size={18} aria-hidden="true" />
             {copy.nav.overview}
           </a>
-          <a className="nav-item" href="#viewer">
-            <MonitorSmartphone size={18} aria-hidden="true" />
-            {copy.nav.viewer}
+          <a className="nav-item" href="#task">
+            <ClipboardList size={18} aria-hidden="true" />
+            {copy.nav.task}
           </a>
           <a className="nav-item" href="#devices">
             <Smartphone size={18} aria-hidden="true" />
             {copy.nav.devices}
           </a>
-          <a className="nav-item" href="#cases">
+          <a className="nav-item" href="#input">
             <UploadCloud size={18} aria-hidden="true" />
-            {copy.nav.cases}
+            {copy.nav.input}
+          </a>
+          <a className="nav-item" href="#run">
+            <Play size={18} aria-hidden="true" />
+            {copy.nav.run}
           </a>
           <a className="nav-item" href="#report">
             <FileText size={18} aria-hidden="true" />
@@ -1151,7 +1237,270 @@ export function App(): ReactElement {
           <small>{copy.runtime.generated(runtimeGeneratedAt)}</small>
         </div>
 
+        <section className="flow-strip" aria-label={copy.titles.testFlow}>
+          {flowSteps.map((step, index) => (
+            <a
+              key={step.href}
+              className={step.done ? 'flow-step complete' : 'flow-step'}
+              href={step.href}
+            >
+              <span className="flow-index">{index + 1}</span>
+              <span>
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+            </a>
+          ))}
+        </section>
+
         <section className="panel-grid two">
+          <article className="panel task-panel" id="task">
+            <div className="panel-heading split">
+              <div>
+                <ClipboardList size={20} aria-hidden="true" />
+                <h2>{copy.titles.createTask}</h2>
+              </div>
+              <StatusPill status={currentTask?.status ?? taskAction.status} language={language} />
+            </div>
+
+            <form className="task-form" onSubmit={(event) => void handleCreateTask(event)}>
+              <label className="field-label" htmlFor="task-name">
+                {copy.fields.name}
+              </label>
+              <input
+                id="task-name"
+                className="text-input"
+                value={taskName}
+                onChange={(event) => setTaskName(event.target.value)}
+                placeholder={copy.copy.taskNamePlaceholder}
+              />
+              <label className="field-label" htmlFor="task-description">
+                {copy.fields.description}
+              </label>
+              <textarea
+                id="task-description"
+                className="text-input task-description-input"
+                value={taskDescription}
+                onChange={(event) => setTaskDescription(event.target.value)}
+                placeholder={copy.copy.taskDescriptionPlaceholder}
+              />
+              <button
+                className="primary-button"
+                disabled={taskAction.status === 'busy'}
+                type="submit"
+              >
+                {taskAction.status === 'busy' ? (
+                  <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <ClipboardList size={18} aria-hidden="true" />
+                )}
+                {currentTask ? copy.actions.newTask : copy.actions.createTask}
+              </button>
+            </form>
+
+            <p className={taskAction.status === 'error' ? 'validation-message' : 'muted'}>
+              {localizeText(taskAction.detail, language)}
+            </p>
+
+            {currentTask ? (
+              <dl className="metric-grid">
+                <div>
+                  <dt>{copy.fields.task}</dt>
+                  <dd>{currentTask.id}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.status}</dt>
+                  <dd>{formatStatusLabel(currentTask.status, language)}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.input}</dt>
+                  <dd>{formatStatusLabel(currentTask.input.mode, language)}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.created}</dt>
+                  <dd>{formatDateTime(currentTask.createdAt, language)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <div className="empty-state">
+                <ClipboardList aria-hidden="true" size={20} />
+                <div>
+                  <strong>{copy.runtime.noTask}</strong>
+                  <span>{copy.copy.createTaskFirst}</span>
+                </div>
+              </div>
+            )}
+          </article>
+
+          <DeviceListPanel
+            devices={devices}
+            selectedDeviceId={selectedDeviceId}
+            onSelectDevice={setSelectedDeviceId}
+            onCheckDevices={() => void handleCheckDevices()}
+            onStartDevice={(device) => void handleStartDevice(device)}
+            deviceAction={deviceAction}
+            language={language}
+          />
+        </section>
+
+        <section className="panel-grid two">
+          <article className="panel input-panel" id="input">
+            <div className="panel-heading split">
+              <div>
+                <UploadCloud size={20} aria-hidden="true" />
+                <h2>{copy.titles.taskInput}</h2>
+              </div>
+              <StatusPill status={readiness.inputMode} language={language} />
+            </div>
+            <p className="muted">{copy.copy.inputHelp}</p>
+            <div className="input-method-grid">
+              <div className="input-method">
+                <div className="method-title">
+                  <UploadCloud size={18} aria-hidden="true" />
+                  <strong>{copy.copy.uploadLabel}</strong>
+                  <StatusPill status={uploadState.status} language={language} />
+                </div>
+                <label
+                  className={taskEditable ? 'upload-dropzone' : 'upload-dropzone disabled-dropzone'}
+                  htmlFor="case-upload"
+                >
+                  <UploadCloud size={24} aria-hidden="true" />
+                  <strong>{uploadState.name || copy.copy.defaultCaseLabel}</strong>
+                  <span>{localizeText(uploadState.detail, language)}</span>
+                </label>
+                <input
+                  id="case-upload"
+                  className="visually-hidden"
+                  type="file"
+                  accept=".yaml,.yml"
+                  disabled={!taskEditable}
+                  onChange={(event) => void handleCaseUpload(event)}
+                />
+              </div>
+
+              <div className="input-method">
+                <label className="method-title" htmlFor="prompt-input">
+                  <MessageSquare size={18} aria-hidden="true" />
+                  <strong>{copy.copy.naturalLanguageLabel}</strong>
+                </label>
+                <textarea
+                  id="prompt-input"
+                  className="prompt-input"
+                  value={prompt}
+                  disabled={!taskEditable}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder={copy.copy.promptPlaceholder}
+                />
+                <span className="subtle-line">{copy.copy.promptOnlyLimit}</span>
+              </div>
+            </div>
+            {currentTaskCase ? (
+              <dl className="metric-grid compact">
+                <div>
+                  <dt>{copy.fields.format}</dt>
+                  <dd>{currentTaskCase.format.toUpperCase()}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.imported}</dt>
+                  <dd>{formatDateTime(currentTaskCase.importedAt, language)}</dd>
+                </div>
+              </dl>
+            ) : null}
+          </article>
+
+          <article className="panel run-panel" id="run">
+            <div className="panel-heading split">
+              <div>
+                <CheckCircle2 size={20} aria-hidden="true" />
+                <h2>{copy.titles.executeTest}</h2>
+              </div>
+              <StatusPill status={currentTask?.status ?? runAction.status} language={language} />
+            </div>
+            <button
+              className="primary-button"
+              disabled={!readiness.canStart || runAction.status === 'busy'}
+              onClick={() => void handleStartRun()}
+            >
+              {runAction.status === 'busy' ? (
+                <Loader2 className="spin" size={18} aria-hidden="true" />
+              ) : (
+                <Play size={18} aria-hidden="true" />
+              )}
+              {copy.actions.startRun}
+            </button>
+            {currentTask && isActiveTaskStatus(currentTask.status) ? (
+              <button
+                className="icon-button"
+                onClick={() => void handleCancelRun()}
+                title={copy.titlesAttr.cancelRun}
+              >
+                <Ban size={18} aria-hidden="true" />
+                {copy.actions.cancel}
+              </button>
+            ) : null}
+            <ul className="blocker-list compact">
+              {(readiness.canStart
+                ? [`Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`]
+                : readiness.reasons
+              ).map((reason) => (
+                <li key={reason}>{localizeText(reason, language)}</li>
+              ))}
+            </ul>
+            <p>{localizeText(runAction.detail, language)}</p>
+            {currentTask ? (
+              <dl className="metric-grid">
+                <div>
+                  <dt>{copy.fields.task}</dt>
+                  <dd>{currentTask.id}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.run}</dt>
+                  <dd>{currentTask.latestRunId ?? copy.runtime.notStarted}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.case}</dt>
+                  <dd>{currentTask.input.testCase?.name ?? currentTask.input.mode}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.device}</dt>
+                  <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
+                </div>
+                <div>
+                  <dt>{copy.fields.updated}</dt>
+                  <dd>{formatDateTime(currentTask.updatedAt, language)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <div className="empty-state">
+                <AlertTriangle aria-hidden="true" size={20} />
+                <div>
+                  <strong>{copy.empty.waitingRunTitle}</strong>
+                  <span>{copy.empty.waitingRunDetail}</span>
+                </div>
+              </div>
+            )}
+
+            {agentMessages.length ? (
+              <ol className="message-list">
+                {agentMessages.map((message) => (
+                  <li key={message.id} className={`message-row message-${message.role}`}>
+                    <strong>{copy.roles[message.role]}</strong>
+                    <span>{localizeText(message.content, language)}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </article>
+        </section>
+
+        <section className="panel-grid two">
+          <ReportPanel
+            report={report}
+            exportState={reportExport}
+            onExportMarkdown={() => void handleExportReport()}
+            language={language}
+          />
+
           <article className="panel" id="viewer">
             <div className="panel-heading split">
               <div>
@@ -1210,161 +1559,6 @@ export function App(): ReactElement {
             </div>
             <span className="subtle-line">{copy.copy.requirementHint}</span>
           </article>
-
-          <DeviceListPanel
-            devices={devices}
-            selectedDeviceId={selectedDeviceId}
-            onSelectDevice={setSelectedDeviceId}
-            onCheckDevices={() => void handleCheckDevices()}
-            onStartDevice={(device) => void handleStartDevice(device)}
-            deviceAction={deviceAction}
-            language={language}
-          />
-        </section>
-
-        <section className="panel-grid two">
-          <article className="panel" id="cases">
-            <div className="panel-heading split">
-              <div>
-                <UploadCloud size={20} aria-hidden="true" />
-                <h2>{copy.titles.testCase}</h2>
-              </div>
-              <StatusPill status={uploadState.status} language={language} />
-            </div>
-            <label className="upload-dropzone" htmlFor="case-upload">
-              <UploadCloud size={24} aria-hidden="true" />
-              <strong>{uploadState.name || copy.copy.defaultCaseLabel}</strong>
-              <span>{localizeText(uploadState.detail, language)}</span>
-            </label>
-            <input
-              id="case-upload"
-              className="visually-hidden"
-              type="file"
-              accept=".yaml,.yml"
-              onChange={(event) => void handleCaseUpload(event)}
-            />
-            {currentTaskCase ? (
-              <dl className="metric-grid compact">
-                <div>
-                  <dt>{copy.fields.format}</dt>
-                  <dd>{currentTaskCase.format.toUpperCase()}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.imported}</dt>
-                  <dd>{formatDateTime(currentTaskCase.importedAt, language)}</dd>
-                </div>
-              </dl>
-            ) : null}
-          </article>
-
-          <article className="panel">
-            <div className="panel-heading split">
-              <div>
-                <MessageSquare size={20} aria-hidden="true" />
-                <h2>{copy.titles.agentTrigger}</h2>
-              </div>
-              <StatusPill status={readiness.canStart ? 'ready' : 'blocked'} language={language} />
-            </div>
-            <textarea
-              className="prompt-input"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={copy.copy.promptPlaceholder}
-            />
-            <button
-              className="primary-button"
-              disabled={!readiness.canStart || runAction.status === 'busy'}
-              onClick={() => void handleStartRun()}
-            >
-              {runAction.status === 'busy' ? (
-                <Loader2 className="spin" size={18} aria-hidden="true" />
-              ) : (
-                <Play size={18} aria-hidden="true" />
-              )}
-              {copy.actions.startRun}
-            </button>
-            <ul className="blocker-list compact">
-              {(readiness.canStart
-                ? [`Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`]
-                : readiness.reasons
-              ).map((reason) => (
-                <li key={reason}>{localizeText(reason, language)}</li>
-              ))}
-            </ul>
-          </article>
-        </section>
-
-        <section className="panel-grid two">
-          <article className="panel run-panel">
-            <div className="panel-heading split">
-              <div>
-                <CheckCircle2 size={20} aria-hidden="true" />
-                <h2>{copy.titles.runStatus}</h2>
-              </div>
-              <StatusPill status={currentTask?.status ?? runAction.status} language={language} />
-            </div>
-            <p>{localizeText(runAction.detail, language)}</p>
-            {currentTask && isActiveTaskStatus(currentTask.status) ? (
-              <button
-                className="icon-button"
-                onClick={() => void handleCancelRun()}
-                title={copy.titlesAttr.cancelRun}
-              >
-                <Ban size={18} aria-hidden="true" />
-                {copy.actions.cancel}
-              </button>
-            ) : null}
-            {currentTask ? (
-              <dl className="metric-grid">
-                <div>
-                  <dt>{copy.fields.task}</dt>
-                  <dd>{currentTask.id}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.run}</dt>
-                  <dd>{currentTask.latestRunId ?? copy.runtime.notStarted}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.case}</dt>
-                  <dd>{currentTask.input.testCase?.name ?? currentTask.input.mode}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.device}</dt>
-                  <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.updated}</dt>
-                  <dd>{formatDateTime(currentTask.updatedAt, language)}</dd>
-                </div>
-              </dl>
-            ) : (
-              <div className="empty-state">
-                <AlertTriangle aria-hidden="true" size={20} />
-                <div>
-                  <strong>{copy.empty.waitingRunTitle}</strong>
-                  <span>{copy.empty.waitingRunDetail}</span>
-                </div>
-              </div>
-            )}
-
-            {agentMessages.length ? (
-              <ol className="message-list">
-                {agentMessages.map((message) => (
-                  <li key={message.id} className={`message-row message-${message.role}`}>
-                    <strong>{copy.roles[message.role]}</strong>
-                    <span>{localizeText(message.content, language)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </article>
-
-          <ReportPanel
-            report={report}
-            exportState={reportExport}
-            onExportMarkdown={() => void handleExportReport()}
-            language={language}
-          />
         </section>
       </section>
     </main>

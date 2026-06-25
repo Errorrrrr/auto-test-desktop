@@ -75,6 +75,8 @@ const STATUS_LABELS: Record<Language, Record<string, string>> = {
     failed: '失败',
     idle: '空闲',
     importing: '导入中',
+    mixed: '混合输入',
+    natural_language: '自然语言',
     not_configured: '未配置',
     queued: '排队中',
     reachable: '可访问',
@@ -83,6 +85,7 @@ const STATUS_LABELS: Record<Language, Record<string, string>> = {
     running: '运行中',
     success: '成功',
     succeeded: '成功',
+    test_case: '测试用例',
     timeout: '超时',
     unchecked: '未检查',
     unreachable: '不可访问'
@@ -101,10 +104,14 @@ const EXACT_ZH: Record<string, string> = {
   'Checking local viewer target.': '正在检查本地 Viewer 地址。',
   'Checking Android/iOS physical and virtual devices.': '正在检查 Android/iOS 真机与虚拟设备。',
   'Configured but not probed in the skeleton baseline.': '已配置，但骨架基线中尚未探测。',
+  'Create a test task before execution.': '请先创建测试任务。',
+  'Create a test task before uploading a case.': '请先创建测试任务，再上传用例。',
+  'Creating test task.': '正在创建测试任务。',
   'Device start is waiting for Electron main IPC.': '设备开启正在等待 Electron 主进程 IPC 接口。',
   'Directory import is reserved for a follow-up adapter and is not enabled in P0.':
     '目录导入预留给后续适配器，P0 暂未启用。',
   'Enter an Agent instruction.': '请输入 Agent 指令。',
+  'Enter a task name.': '请输入任务名称。',
   'Exporting Markdown report.': '正在导出 Markdown 报告。',
   'Import a valid Maestro test case.': '请导入有效的 Maestro 测试用例。',
   'Importing through the task workspace API.': '正在通过任务工作区 API 导入。',
@@ -161,6 +168,7 @@ const EXACT_ZH: Record<string, string> = {
   'Task-scoped imports require the Electron main process.':
     '任务级导入需要 Electron 主进程。',
   'Task execution requires the Electron main process.': '任务执行需要 Electron 主进程。',
+  'Task has not been created.': '尚未创建测试任务。',
   'Test case source was not found.': '未找到测试用例源文件。',
   'The selected file is empty.': '所选文件为空。',
   'Unexpected local runtime error.': '本地运行时出现异常。',
@@ -211,6 +219,7 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
     [/^Task (.+) is already (.+)\.$/, (match) => `任务 ${match[1]} 已经是 ${localizeStatus(match[2], language)} 状态。`],
     [/^Task (.+) finished as (.+)\.$/, (match) => `任务 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
     [/^Task (.+) is (.+)\.$/, (match) => `任务 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
+    [/^Task (.+) created\.$/, (match) => `任务 ${match[1]} 已创建。`],
     [/^Test case (.+) was not found\.$/, (match) => `未找到测试用例 ${match[1]}。`],
     [/^Test case is (.+); max upload size is (.+)\.$/, (match) => `测试用例大小为 ${match[1]}，上传上限为 ${match[2]}。`],
     [/^Test case source was not found: (.+)$/, (match) => `未找到测试用例源文件：${match[1]}`],
@@ -268,15 +277,19 @@ export const COPY = {
     },
     nav: {
       overview: '概览',
+      task: '任务',
       viewer: 'Viewer',
       devices: '设备',
-      cases: '用例',
+      input: '输入',
+      run: '执行',
       report: '报告'
     },
     actions: {
       cancel: '取消',
       checkDevices: '检查设备',
+      createTask: '创建任务',
       export: '导出',
+      newTask: '新建任务',
       open: '打开',
       probe: '探测',
       refresh: '刷新',
@@ -286,10 +299,15 @@ export const COPY = {
     titles: {
       agent: 'Agent',
       agentTrigger: 'Agent 触发',
+      createTask: '创建测试任务',
+      currentTask: '当前任务',
       devices: '设备',
+      executeTest: '执行测试',
       maestro: 'Maestro',
       report: '报告',
       runStatus: '运行状态',
+      taskInput: '上传用例或自然语言',
+      testFlow: '测试流程',
       testCase: '测试用例',
       viewer: 'Viewer',
       viewerUrl: 'Viewer URL'
@@ -304,22 +322,34 @@ export const COPY = {
     },
     fields: {
       case: '用例',
+      created: '创建时间',
+      description: '描述',
       device: '设备',
       devices: '设备',
       duration: '耗时',
       format: '格式',
       generated: '生成时间',
       imported: '导入时间',
+      input: '输入',
       localTarget: '本地地址',
+      name: '名称',
       run: '运行',
+      status: '状态',
       task: '任务',
       target: '目标',
       updated: '更新时间'
     },
     copy: {
+      createTaskFirst: '任务创建后，才能继续选择设备、配置输入并执行测试。',
       defaultCaseLabel: '选择 Maestro YAML',
+      inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者同时存在时会作为混合输入执行。',
+      naturalLanguageLabel: '自然语言',
       promptPlaceholder: '在所选设备上运行已上传的冒烟 flow',
+      promptOnlyLimit: '仅自然语言路径会进入 Agent 执行器；当前未配置时会生成阻断报告。',
       requirementHint: '需求端口：9999。当前 Maestro 提示：10000。',
+      taskDescriptionPlaceholder: '例如：验证登录主流程、覆盖关键失败态',
+      taskNamePlaceholder: '例如：登录冒烟测试',
+      uploadLabel: '上传用例',
       viewerUrlMustBeLocal: 'Viewer URL 必须指向 localhost、127.0.0.1 或 ::1。'
     },
     titlesAttr: {
@@ -348,7 +378,8 @@ export const COPY = {
       notLoaded: '未加载',
       notSelected: '未选择',
       notStarted: '未开始',
-      selectedDevice: '所选设备'
+      selectedDevice: '所选设备',
+      noTask: '未创建任务'
     },
     roles: {
       assistant: '助手',
@@ -387,15 +418,19 @@ export const COPY = {
     },
     nav: {
       overview: 'Overview',
+      task: 'Task',
       viewer: 'Viewer',
       devices: 'Devices',
-      cases: 'Cases',
+      input: 'Input',
+      run: 'Run',
       report: 'Report'
     },
     actions: {
       cancel: 'Cancel',
       checkDevices: 'Check devices',
+      createTask: 'Create Task',
       export: 'Export',
+      newTask: 'New Task',
       open: 'Open',
       probe: 'Probe',
       refresh: 'Refresh',
@@ -405,10 +440,15 @@ export const COPY = {
     titles: {
       agent: 'Agent',
       agentTrigger: 'Agent Trigger',
+      createTask: 'Create Test Task',
+      currentTask: 'Current Task',
       devices: 'Devices',
+      executeTest: 'Execute Test',
       maestro: 'Maestro',
       report: 'Report',
       runStatus: 'Run Status',
+      taskInput: 'Upload Case or Natural Language',
+      testFlow: 'Test Flow',
       testCase: 'Test Case',
       viewer: 'Viewer',
       viewerUrl: 'Viewer URL'
@@ -423,22 +463,34 @@ export const COPY = {
     },
     fields: {
       case: 'Case',
+      created: 'Created',
+      description: 'Description',
       device: 'Device',
       devices: 'Devices',
       duration: 'Duration',
       format: 'Format',
       generated: 'Generated',
       imported: 'Imported',
+      input: 'Input',
       localTarget: 'Local target',
+      name: 'Name',
       run: 'Run',
+      status: 'Status',
       task: 'Task',
       target: 'Target',
       updated: 'Updated'
     },
     copy: {
+      createTaskFirst: 'Create the task before selecting a device, configuring input, and executing the test.',
       defaultCaseLabel: 'Select Maestro YAML',
+      inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. If both exist, the task runs as mixed input.',
+      naturalLanguageLabel: 'Natural language',
       promptPlaceholder: 'Run the uploaded smoke flow on the selected device',
+      promptOnlyLimit: 'Prompt-only execution enters the Agent executor path; when it is not configured, the task returns a blocked report.',
       requirementHint: 'Requirement: 9999. Current Maestro hint: 10000.',
+      taskDescriptionPlaceholder: 'Example: validate the login happy path and key failure states',
+      taskNamePlaceholder: 'Example: Login smoke test',
+      uploadLabel: 'Upload case',
       viewerUrlMustBeLocal: 'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
     },
     titlesAttr: {
@@ -466,7 +518,8 @@ export const COPY = {
       notLoaded: 'Not loaded',
       notSelected: 'Not selected',
       notStarted: 'not started',
-      selectedDevice: 'selected device'
+      selectedDevice: 'selected device',
+      noTask: 'No task created'
     },
     roles: {
       assistant: 'assistant',
