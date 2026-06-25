@@ -150,11 +150,14 @@ export function getDeviceInspectionSummary(devices: DeviceInfo[]): DeviceInspect
 }
 
 export function getPreferredDeviceId(devices: DeviceInfo[], currentDeviceId: string): string {
-  if (currentDeviceId && devices.some((device) => device.id === currentDeviceId)) {
+  if (
+    currentDeviceId &&
+    devices.some((device) => device.id === currentDeviceId && isExecutableDevice(device))
+  ) {
     return currentDeviceId;
   }
 
-  return getExecutableDevices(devices)[0]?.id ?? devices[0]?.id ?? '';
+  return getExecutableDevices(devices)[0]?.id ?? '';
 }
 
 export function getSelectedDevice(
@@ -189,6 +192,37 @@ export function getTaskInputMode(task: TestTask | null, prompt: string): TaskInp
   }
 
   return 'empty';
+}
+
+function getTaskRecencyTime(task: TestTask): number {
+  const updatedAt = Date.parse(task.updatedAt);
+
+  if (Number.isFinite(updatedAt)) {
+    return updatedAt;
+  }
+
+  const createdAt = Date.parse(task.createdAt);
+
+  return Number.isFinite(createdAt) ? createdAt : 0;
+}
+
+export function getMostRecentTask(tasks: TestTask[]): TestTask | undefined {
+  return [...tasks].sort((left, right) => {
+    const timeDiff = getTaskRecencyTime(right) - getTaskRecencyTime(left);
+
+    if (timeDiff !== 0) {
+      return timeDiff;
+    }
+
+    return right.id.localeCompare(left.id);
+  })[0];
+}
+
+export function getCurrentTaskAfterRefresh(
+  currentTask: TestTask | null,
+  refreshedTasks: TestTask[]
+): TestTask | null {
+  return currentTask ?? getMostRecentTask(refreshedTasks) ?? null;
 }
 
 export function getRunReadiness(input: {

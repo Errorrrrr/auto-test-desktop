@@ -97,6 +97,28 @@ function getDeviceSnapshot(run: TestRun): DeviceInfo {
   };
 }
 
+function getTaskRecencyTime(task: TestTask): number {
+  const updatedAt = Date.parse(task.updatedAt);
+
+  if (Number.isFinite(updatedAt)) {
+    return updatedAt;
+  }
+
+  const createdAt = Date.parse(task.createdAt);
+
+  return Number.isFinite(createdAt) ? createdAt : 0;
+}
+
+function compareTasksByRecency(left: TestTask, right: TestTask): number {
+  const timeDiff = getTaskRecencyTime(right) - getTaskRecencyTime(left);
+
+  if (timeDiff !== 0) {
+    return timeDiff;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
 export class TaskService {
   private readonly reports?: ReportService;
   private readonly runService?: TestRunService;
@@ -135,8 +157,9 @@ export class TaskService {
 
   async list(): Promise<TestTask[]> {
     const tasks = await this.storage.getTaskStore().list();
+    const syncedTasks = await Promise.all(tasks.map((task) => this.syncTaskWithLatestRun(task)));
 
-    return Promise.all(tasks.map((task) => this.syncTaskWithLatestRun(task)));
+    return [...syncedTasks].sort(compareTasksByRecency);
   }
 
   async get(request: unknown): Promise<TestTask> {

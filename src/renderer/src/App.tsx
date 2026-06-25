@@ -50,6 +50,7 @@ import {
   getDeviceInspectionSummary,
   formatStatusLabel,
   getErrorMessage,
+  getCurrentTaskAfterRefresh,
   getExecutableDevices,
   getPreferredDeviceId,
   getReportFormatLabel,
@@ -655,6 +656,7 @@ export function App(): ReactElement {
     [currentTask, devices, environment, prompt, selectedDeviceId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
+  const selectedDeviceCanExecute = Boolean(selectedDevice && isExecutableDevice(selectedDevice));
   const currentTaskCase = currentTask?.input.testCase;
   const runtimeGeneratedAt = environment ? formatDateTime(environment.generatedAt, language) : copy.runtime.notLoaded;
   const trimmedViewerUrl = viewerUrl.trim();
@@ -671,7 +673,7 @@ export function App(): ReactElement {
       href: '#devices',
       label: copy.titles.devices,
       detail: selectedDevice?.name ?? copy.runtime.notSelected,
-      done: Boolean(readiness.selectedDevice)
+      done: selectedDeviceCanExecute
     },
     {
       href: '#input',
@@ -781,8 +783,7 @@ export function App(): ReactElement {
         api.viewer.getConfig(),
         api.tasks.list()
       ]);
-      const mostRecentTask = tasks[0];
-      const nextTask = currentTask ?? mostRecentTask ?? null;
+      const nextTask = getCurrentTaskAfterRefresh(currentTask, tasks);
 
       setEnvironment(nextEnvironment);
       setDevices(nextDevices);
@@ -790,8 +791,8 @@ export function App(): ReactElement {
       setViewerUrl(nextViewerConfig.url);
       setSelectedDeviceId((current) => getPreferredDeviceId(nextDevices, current));
       setCurrentTask(nextTask);
-      if (mostRecentTask?.input.naturalLanguage?.prompt) {
-        setPrompt((value) => value || mostRecentTask.input.naturalLanguage?.prompt || '');
+      if (nextTask?.input.naturalLanguage?.prompt) {
+        setPrompt((value) => value || nextTask.input.naturalLanguage?.prompt || '');
       }
       if (nextTask) {
         setTaskAction({
