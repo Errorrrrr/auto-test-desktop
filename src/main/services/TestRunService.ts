@@ -195,8 +195,8 @@ export class TestRunService {
     }
 
     this.cancelledRunIds.add(runId);
-    abortController?.abort();
     await this.recordRun(cancelled);
+    abortController?.abort();
 
     return cancelled;
   }
@@ -257,7 +257,7 @@ export class TestRunService {
       });
       const current = await this.getRun(runId);
 
-      if (!current || current.status === 'cancelled') {
+      if (!current || current.status === 'cancelled' || this.cancelledRunIds.has(runId)) {
         return;
       }
 
@@ -271,7 +271,7 @@ export class TestRunService {
     } catch (error) {
       const current = await this.getRun(runId);
 
-      if (!current || current.status === 'cancelled') {
+      if (!current || current.status === 'cancelled' || this.cancelledRunIds.has(runId)) {
         return;
       }
 
@@ -282,6 +282,7 @@ export class TestRunService {
       });
     } finally {
       this.abortControllers.delete(runId);
+      this.cancelledRunIds.delete(runId);
     }
   }
 

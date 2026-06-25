@@ -313,6 +313,52 @@ describe('TestRunService', () => {
     });
   });
 
+  it('keeps cancelled runs cancelled when the provider rejects immediately on abort', async () => {
+    let runSignal: AbortSignal | undefined;
+    const { runs } = await createRunService({
+      runFlow: async (request) => {
+        const signal = request.signal;
+
+        if (!signal) {
+          throw new Error('Expected run flow to receive an abort signal.');
+        }
+
+        runSignal = signal;
+
+        return new Promise<MaestroRunFlowResult>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new Error('Provider rejected immediately after abort.'));
+            },
+            { once: true }
+          );
+        });
+      }
+    });
+    const run = await runs.start({
+      caseId: importedCase.id,
+      deviceId: connectedDevice.id,
+      prompt: 'Run smoke'
+    });
+
+    await waitForStatus(runs, run.id, ['running']);
+    for (let attempt = 0; attempt < 20 && !runSignal; attempt += 1) {
+      await sleep();
+    }
+    const cancelledRun = await runs.cancel({ runId: run.id });
+    await sleep(20);
+
+    expect(cancelledRun).toMatchObject({
+      status: 'cancelled',
+      failureReason: 'Run cancelled by user. Underlying Maestro process termination signal sent.'
+    });
+    expect(runSignal?.aborted).toBe(true);
+    await expect(runs.getStatus({ runId: run.id })).resolves.toMatchObject({
+      status: 'cancelled'
+    });
+  });
+
   it('allows degraded agent mode when execution still requires manual confirmation', async () => {
     const { runs } = await createRunService({
       agentHealth: {
