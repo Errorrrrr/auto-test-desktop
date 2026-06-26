@@ -1172,8 +1172,8 @@ export function App(): ReactElement {
       icon: <FileText size={20} aria-hidden="true" />,
       key: 'latest-report',
       label: copy.dashboard.latestReport,
-      status: report?.status ?? latestTask?.status ?? 'idle',
-      value: report ? formatStatusLabel(report.status, language) : formatStatusLabel(latestTask?.status ?? 'idle', language)
+      status: latestTask?.status ?? 'idle',
+      value: formatStatusLabel(latestTask?.status ?? 'idle', language)
     },
     {
       detail: environment?.canStartRun ? copy.dashboard.readyToRun : (environment?.blockers[0] ?? copy.runtime.notLoaded),
@@ -1466,7 +1466,7 @@ export function App(): ReactElement {
     void refreshRuntime();
   }, []);
 
-  async function handleCheckDevices(): Promise<void> {
+  async function refreshDevices(options: { updateTaskSelection: boolean }): Promise<void> {
     setDeviceAction({
       status: 'busy',
       detail: 'Checking Android/iOS physical and virtual devices.'
@@ -1477,7 +1477,7 @@ export function App(): ReactElement {
       const summary = getDeviceInspectionSummary(nextDevices);
 
       setDevices(nextDevices);
-      if (currentTask) {
+      if (options.updateTaskSelection && currentTask) {
         updateTaskWorkspaceState(currentTask.id, (current) => ({
           ...current,
           selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
@@ -1495,7 +1495,15 @@ export function App(): ReactElement {
     }
   }
 
-  async function handleStartDevice(device: DeviceInfo): Promise<void> {
+  async function handleCheckDevices(): Promise<void> {
+    await refreshDevices({ updateTaskSelection: true });
+  }
+
+  async function handleManageCheckDevices(): Promise<void> {
+    await refreshDevices({ updateTaskSelection: false });
+  }
+
+  async function startDevice(device: DeviceInfo, options: { updateTaskSelection: boolean }): Promise<void> {
     if (!isStartableDevice(device)) {
       setDeviceAction({
         status: 'error',
@@ -1518,7 +1526,7 @@ export function App(): ReactElement {
       ) : await api.devices.list();
 
       setDevices(nextDevices);
-      if (currentTask) {
+      if (options.updateTaskSelection && currentTask) {
         updateTaskWorkspaceState(currentTask.id, (current) => ({
           ...current,
           selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
@@ -1532,6 +1540,14 @@ export function App(): ReactElement {
         deviceId: device.id
       });
     }
+  }
+
+  async function handleStartDevice(device: DeviceInfo): Promise<void> {
+    await startDevice(device, { updateTaskSelection: true });
+  }
+
+  async function handleManageStartDevice(device: DeviceInfo): Promise<void> {
+    await startDevice(device, { updateTaskSelection: false });
   }
 
   async function handleViewerProbe(): Promise<void> {
@@ -2010,8 +2026,8 @@ export function App(): ReactElement {
           <section className="workspace-page" data-page="devices">
             <DeviceListPanel
               devices={devices}
-              onCheckDevices={() => void handleCheckDevices()}
-              onStartDevice={(device) => void handleStartDevice(device)}
+              onCheckDevices={() => void handleManageCheckDevices()}
+              onStartDevice={(device) => void handleManageStartDevice(device)}
               deviceAction={deviceAction}
               language={language}
               selectionMode="manage"

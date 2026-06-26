@@ -248,6 +248,25 @@ describe('workbench panels', () => {
     expect(appSource).not.toContain('const [report, setReport]');
   });
 
+  it('keeps device management actions from mutating task-scoped device selection', () => {
+    const devicesPage = appSource.match(/\{activePage === 'devices' \? \([\s\S]*?\{activePage === 'viewer'/)?.[0] ?? '';
+
+    expect(devicesPage).toContain('onCheckDevices={() => void handleManageCheckDevices()}');
+    expect(devicesPage).toContain('onStartDevice={(device) => void handleManageStartDevice(device)}');
+    expect(devicesPage).not.toContain('handleCheckDevices()');
+    expect(devicesPage).not.toContain('handleStartDevice(device)');
+  });
+
+  it('keeps the latest task dashboard card on latest task data only', () => {
+    const latestTaskMetric = appSource.match(/detail: latestTask[\s\S]*?value:[^\n]+/)?.[0] ?? '';
+
+    expect(latestTaskMetric).toContain('detail: latestTask ? latestTask.name');
+    expect(latestTaskMetric).toContain("status: latestTask?.status ?? 'idle'");
+    expect(latestTaskMetric).toContain("value: formatStatusLabel(latestTask?.status ?? 'idle', language)");
+    expect(latestTaskMetric).not.toContain('report?.status');
+    expect(latestTaskMetric).not.toContain('report ?');
+  });
+
   it('keeps the renderer workflow on task-scoped APIs instead of legacy run APIs', () => {
     expect(appSource).toContain('api.tasks.importCase');
     expect(appSource).toContain('api.tasks.start');
