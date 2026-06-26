@@ -47,6 +47,18 @@ export class FileManifestStore<T extends ManifestRecord> {
     await mutation;
   }
 
+  async delete(id: string): Promise<void> {
+    const mutation = this.mutationQueue.then(async () => {
+      const records = await this.list();
+      const nextRecords = records.filter((existing) => existing.id !== id);
+
+      await this.write(nextRecords);
+    });
+
+    this.mutationQueue = mutation.catch(() => undefined);
+    await mutation;
+  }
+
   private async write(records: T[]): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
 

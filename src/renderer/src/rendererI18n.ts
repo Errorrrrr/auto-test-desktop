@@ -276,10 +276,10 @@ export const COPY = {
       title: '自动化测试工作台'
     },
     nav: {
-      overview: '概览',
-      task: '任务',
+      overview: '仪表盘',
+      task: '测试任务',
       viewer: 'Viewer',
-      devices: '设备',
+      devices: '设备管理',
       input: '输入',
       run: '执行',
       report: '报告'
@@ -288,6 +288,7 @@ export const COPY = {
       cancel: '取消',
       checkDevices: '检查设备',
       createTask: '创建任务',
+      deleteTask: '删除任务',
       export: '导出',
       newTask: '新建任务',
       open: '打开',
@@ -301,7 +302,8 @@ export const COPY = {
       agentTrigger: 'Agent 触发',
       createTask: '创建测试任务',
       currentTask: '当前任务',
-      devices: '设备',
+      devices: '设备选择',
+      deviceManagement: '设备管理',
       executeTest: '执行测试',
       maestro: 'Maestro',
       report: '报告',
@@ -313,6 +315,18 @@ export const COPY = {
       testCase: '测试用例',
       viewer: 'Viewer',
       viewerUrl: 'Viewer URL'
+    },
+    dashboard: {
+      blocked: '阻塞',
+      devices: '已连接设备',
+      label: '仪表盘数据',
+      latestReport: '最近任务',
+      ready: '就绪',
+      readyToRun: '环境已满足启动条件',
+      runtime: '运行就绪',
+      tasks: '测试任务',
+      tasksDetail: (active: number, finished: number) =>
+        `${active} 个执行中，${finished} 个已完成或结束`
     },
     empty: {
       noExecutableDevicesTitle: '没有可执行设备',
@@ -349,6 +363,7 @@ export const COPY = {
       createTaskFirst: '任务创建后，才能继续选择设备、配置输入并执行测试。',
       defaultCaseLabel: '选择 Maestro YAML',
       inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者同时存在时会作为混合输入执行。',
+      deleteTaskConfirm: (name: string) => `确认删除测试任务“${name}”？该操作会移除任务工作区数据。`,
       naturalLanguageLabel: '自然语言',
       promptPlaceholder: '在所选设备上运行已上传的冒烟 flow',
       promptOnlyLimit: '仅自然语言路径会进入 Agent 执行器；当前未配置时会生成阻断报告。',
@@ -361,6 +376,8 @@ export const COPY = {
     titlesAttr: {
       cancelRun: '取消运行',
       checkDevices: '检查本地设备',
+      deleteRunningTask: '运行中的任务不能删除',
+      deleteTask: '删除测试任务',
       exportMarkdown: '导出 Markdown 报告',
       openLocalViewer: '打开本地 Viewer',
       probeViewer: '探测 Viewer',
@@ -423,10 +440,10 @@ export const COPY = {
       title: 'Automation Workbench'
     },
     nav: {
-      overview: 'Overview',
-      task: 'Task',
+      overview: 'Dashboard',
+      task: 'Test Tasks',
       viewer: 'Viewer',
-      devices: 'Devices',
+      devices: 'Device Management',
       input: 'Input',
       run: 'Run',
       report: 'Report'
@@ -435,6 +452,7 @@ export const COPY = {
       cancel: 'Cancel',
       checkDevices: 'Check devices',
       createTask: 'Create Task',
+      deleteTask: 'Delete task',
       export: 'Export',
       newTask: 'New Task',
       open: 'Open',
@@ -448,7 +466,8 @@ export const COPY = {
       agentTrigger: 'Agent Trigger',
       createTask: 'Create Test Task',
       currentTask: 'Current Task',
-      devices: 'Devices',
+      devices: 'Device Selection',
+      deviceManagement: 'Device Management',
       executeTest: 'Execute Test',
       maestro: 'Maestro',
       report: 'Report',
@@ -460,6 +479,18 @@ export const COPY = {
       testCase: 'Test Case',
       viewer: 'Viewer',
       viewerUrl: 'Viewer URL'
+    },
+    dashboard: {
+      blocked: 'Blocked',
+      devices: 'Connected Devices',
+      label: 'Dashboard metrics',
+      latestReport: 'Latest Task',
+      ready: 'Ready',
+      readyToRun: 'Environment is ready to start runs',
+      runtime: 'Runtime Readiness',
+      tasks: 'Test Tasks',
+      tasksDetail: (active: number, finished: number) =>
+        `${active} active, ${finished} finished or closed`
     },
     empty: {
       noExecutableDevicesTitle: 'No executable devices',
@@ -496,6 +527,7 @@ export const COPY = {
       createTaskFirst: 'Create the task before selecting a device, configuring input, and executing the test.',
       defaultCaseLabel: 'Select Maestro YAML',
       inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. If both exist, the task runs as mixed input.',
+      deleteTaskConfirm: (name: string) => `Delete test task "${name}"? This removes its task workspace data.`,
       naturalLanguageLabel: 'Natural language',
       promptPlaceholder: 'Run the uploaded smoke flow on the selected device',
       promptOnlyLimit: 'Prompt-only execution enters the Agent executor path; when it is not configured, the task returns a blocked report.',
@@ -508,6 +540,8 @@ export const COPY = {
     titlesAttr: {
       cancelRun: 'Cancel run',
       checkDevices: 'Check local devices',
+      deleteRunningTask: 'Running tasks cannot be deleted',
+      deleteTask: 'Delete test task',
       exportMarkdown: 'Export Markdown report',
       openLocalViewer: 'Open local viewer',
       probeViewer: 'Probe viewer',

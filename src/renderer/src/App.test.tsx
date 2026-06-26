@@ -66,8 +66,9 @@ describe('app shell scrolling', () => {
       const html = renderToStaticMarkup(<App />);
 
       expect(html).toContain('自动化测试工作台');
-      expect(html).toContain('创建测试任务');
-      expect(html).toContain('上传用例或自然语言');
+      expect(html).toContain('仪表盘');
+      expect(html).toContain('测试任务');
+      expect(html).toContain('设备管理');
       expect(html).toContain('中文');
       expect(html).toContain('English');
       expect(html).toContain('刷新');
@@ -110,40 +111,40 @@ describe('app shell scrolling', () => {
     }
   });
 
-  it('renders the user-approved task flow as menu page entries', () => {
+  it('renders the durable left navigation as dashboard, task list, device management, and viewer only', () => {
     vi.stubGlobal('window', { appAutoTest: undefined });
 
     try {
       const html = renderToStaticMarkup(<App />);
 
-      expect(html).toContain('aria-label="测试流程"');
-      expect(html).toContain('创建测试任务');
-      expect(html).toContain('设备');
-      expect(html).toContain('上传用例或自然语言');
-      expect(html).toContain('执行测试');
-      expect(html).toContain('报告');
+      expect(html).toContain('data-target-page="overview"');
       expect(html).toContain('data-target-page="task"');
       expect(html).toContain('data-target-page="devices"');
-      expect(html).toContain('data-target-page="input"');
-      expect(html).toContain('data-target-page="run"');
-      expect(html).toContain('data-target-page="report"');
-      expect(html.indexOf('class="flow-strip"')).toBeLessThan(
-        html.indexOf('class="menu-card-grid"')
-      );
+      expect(html).toContain('data-target-page="viewer"');
+      expect(html).toContain('仪表盘');
+      expect(html).toContain('测试任务');
+      expect(html).toContain('设备管理');
+      expect(html).not.toContain('aria-label="测试流程"');
+      expect(html).not.toContain('data-target-page="input"');
+      expect(html).not.toContain('data-target-page="run"');
+      expect(html).not.toContain('data-target-page="report"');
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('keeps the default home page as a workbench menu instead of one long workflow page', () => {
+  it('keeps the default home page as a dashboard instead of a workflow menu page', () => {
     vi.stubGlobal('window', { appAutoTest: undefined });
 
     try {
       const html = renderToStaticMarkup(<App />);
 
       expect(html).toContain('data-page="overview"');
-      expect(html).toContain('class="menu-card-grid"');
-      expect(html).toContain('data-target-page="viewer"');
+      expect(html).toContain('class="dashboard-grid"');
+      expect(html).toContain('data-dashboard-metric="tasks-total"');
+      expect(html).toContain('data-dashboard-metric="devices-connected"');
+      expect(html).toContain('data-dashboard-metric="latest-report"');
+      expect(html).not.toContain('class="menu-card-grid"');
       expect(html).not.toContain('id="task"');
       expect(html).not.toContain('id="devices"');
       expect(html).not.toContain('id="input"');
@@ -221,14 +222,19 @@ describe('workbench panels', () => {
     expect(html).toContain('class="task-workspace-layout"');
     expect(html).toContain('class="panel task-list-panel"');
     expect(html).toContain('class="panel task-detail-panel"');
+    expect(html).toContain('data-task-detail-section="devices"');
+    expect(html).toContain('data-task-detail-section="input"');
+    expect(html).toContain('data-task-detail-section="progress"');
+    expect(html).toContain('data-task-detail-section="report"');
     expect(html).toContain('data-task-id="task-login"');
     expect(html).toContain('data-task-id="task-checkout"');
     expect(html).toContain('Checkout regression');
     expect(html).toMatch(/aria-pressed="true"[^>]*data-task-id="task-checkout"/);
-    expect(html).toContain('data-page-link="devices"');
-    expect(html).toContain('data-page-link="input"');
-    expect(html).toContain('data-page-link="run"');
-    expect(html).toContain('data-page-link="report"');
+    expect(html).toContain('Delete task');
+    expect(html).not.toContain('data-page-link="devices"');
+    expect(html).not.toContain('data-page-link="input"');
+    expect(html).not.toContain('data-page-link="run"');
+    expect(html).not.toContain('data-page-link="report"');
     expect(html).not.toContain('run-login');
     expect(html).not.toContain('Pixel 8');
   });
@@ -246,6 +252,7 @@ describe('workbench panels', () => {
     expect(appSource).toContain('api.tasks.importCase');
     expect(appSource).toContain('api.tasks.start');
     expect(appSource).toContain('api.tasks.cancel');
+    expect(appSource).toContain('api.tasks.delete');
     expect(appSource).toContain('api.tasks.getReport');
     expect(appSource).toContain('api.tasks.exportReport');
     expect(appSource).not.toMatch(/api\.(cases|runs|reports)\./);

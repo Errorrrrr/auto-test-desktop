@@ -136,6 +136,7 @@ describe('main process IPC handlers', () => {
         IPC_CHANNELS.runs.start,
         IPC_CHANNELS.tasks.cancel,
         IPC_CHANNELS.tasks.create,
+        IPC_CHANNELS.tasks.delete,
         IPC_CHANNELS.tasks.exportReport,
         IPC_CHANNELS.tasks.get,
         IPC_CHANNELS.tasks.getReport,
@@ -168,5 +169,14 @@ describe('main process IPC handlers', () => {
     ).rejects.toMatchObject({
       code: 'TASK_INPUT_REQUIRED'
     });
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.tasks.delete, {
+        taskId: (task as { id: string }).id
+      })
+    ).resolves.toMatchObject({
+      id: (task as { id: string }).id,
+      name: 'Smoke task'
+    });
+    await expect(invokeIpcHandler(handlers, IPC_CHANNELS.tasks.list)).resolves.toEqual([]);
   });
 });

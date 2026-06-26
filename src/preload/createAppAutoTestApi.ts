@@ -57,6 +57,7 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
       create: (request: TaskCreateRequest) => invoke<TestTask>(IPC_CHANNELS.tasks.create, request),
       list: () => invoke<TestTask[]>(IPC_CHANNELS.tasks.list),
       get: (taskId: string) => invoke<TestTask>(IPC_CHANNELS.tasks.get, { taskId }),
+      delete: (taskId: string) => invoke<TestTask>(IPC_CHANNELS.tasks.delete, { taskId }),
       updateInput: (request: TaskUpdateInputRequest) =>
         invoke<TestTask>(IPC_CHANNELS.tasks.updateInput, request),
       importCase: (request: TaskImportCaseRequest) =>

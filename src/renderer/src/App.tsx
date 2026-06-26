@@ -1,6 +1,5 @@
 import {
   Activity,
-  AlertTriangle,
   Ban,
   Cable,
   CheckCircle2,
@@ -14,6 +13,7 @@ import {
   RefreshCw,
   Settings2,
   Smartphone,
+  Trash2,
   UploadCloud
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, ReactElement, useEffect, useMemo, useState } from 'react';
@@ -66,6 +66,7 @@ import {
   validateCaseFile,
   validateViewerUrl
 } from './workbenchModel';
+import type { RunReadiness } from './workbenchModel';
 
 type ViewerOpener = (url: string, target: string, features: string) => Window | null;
 
@@ -88,7 +89,7 @@ type TaskWorkspaceState = {
   agentMessages: AgentMessage[];
 };
 
-type MenuPage = 'overview' | 'task' | 'devices' | 'input' | 'run' | 'report' | 'viewer';
+type MenuPage = 'overview' | 'task' | 'devices' | 'viewer';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
@@ -314,6 +315,11 @@ function createBrowserFallbackApi(): AppAutoTestApi {
         createBrowserFallbackTask({
           id: taskId
         }),
+      delete: async (taskId) =>
+        createBrowserFallbackTask({
+          id: taskId,
+          status: 'cancelled'
+        }),
       updateInput: async (request) =>
         createBrowserFallbackTask({
           id: request.taskId,
@@ -432,32 +438,37 @@ export function openAllowedViewerUrl(value: string, opener: ViewerOpener): boole
 
 export function DeviceListPanel({
   devices,
+  framed = true,
   selectedDeviceId,
   onSelectDevice,
   onCheckDevices,
   onStartDevice,
   deviceAction,
-  language = 'en'
+  language = 'en',
+  selectionMode = 'select'
 }: {
   devices: DeviceInfo[];
-  selectedDeviceId: string;
-  onSelectDevice: (deviceId: string) => void;
+  framed?: boolean;
+  selectedDeviceId?: string;
+  onSelectDevice?: (deviceId: string) => void;
   onCheckDevices?: () => void;
   onStartDevice?: (device: DeviceInfo) => void;
   deviceAction?: DeviceActionState;
   language?: Language;
+  selectionMode?: 'manage' | 'select';
 }): ReactElement {
   const executableDevices = getExecutableDevices(devices);
   const summary = getDeviceInspectionSummary(devices);
   const copy = COPY[language];
   const checkingDevices = deviceAction?.status === 'busy' && !deviceAction.deviceId;
+  const selectable = selectionMode === 'select';
 
   return (
-    <article className="panel device-panel" id="devices">
+    <article className={framed ? 'panel device-panel' : 'device-panel'} id={selectable ? 'task-devices' : 'devices'}>
       <div className="panel-heading split">
         <div>
           <Smartphone size={20} aria-hidden="true" />
-          <h2>{copy.titles.devices}</h2>
+          <h2>{selectable ? copy.titles.devices : copy.titles.deviceManagement}</h2>
         </div>
         <div className="heading-actions">
           {onCheckDevices ? (
@@ -492,21 +503,33 @@ export function DeviceListPanel({
 
             return (
               <li key={device.id} className={executable ? 'device-row' : 'device-row disabled-row'}>
-                <label>
-                  <input
-                    type="radio"
-                    name="target-device"
-                    checked={selectedDeviceId === device.id}
-                    disabled={!executable}
-                    onChange={() => onSelectDevice(device.id)}
-                  />
-                  <span>
-                    <strong>{device.name}</strong>
-                    <small>
-                      {device.platform} / {device.type}
-                    </small>
-                  </span>
-                </label>
+                {selectable ? (
+                  <label>
+                    <input
+                      type="radio"
+                      name="target-device"
+                      checked={selectedDeviceId === device.id}
+                      disabled={!executable}
+                      onChange={() => onSelectDevice?.(device.id)}
+                    />
+                    <span>
+                      <strong>{device.name}</strong>
+                      <small>
+                        {device.platform} / {device.type}
+                      </small>
+                    </span>
+                  </label>
+                ) : (
+                  <div className="device-row-info">
+                    <Smartphone size={16} aria-hidden="true" />
+                    <span>
+                      <strong>{device.name}</strong>
+                      <small>
+                        {device.platform} / {device.type}
+                      </small>
+                    </span>
+                  </div>
+                )}
                 <div className="device-actions">
                   <StatusPill
                     status={device.connected ? 'ready' : 'disconnected'}
@@ -558,11 +581,13 @@ export function DeviceListPanel({
 }
 
 export function ReportPanel({
+  framed = true,
   report,
   exportState,
   onExportMarkdown,
   language = 'en'
 }: {
+  framed?: boolean;
   report: TaskReport | null;
   exportState: RunActionState;
   onExportMarkdown: () => void;
@@ -572,7 +597,7 @@ export function ReportPanel({
 
   if (!report) {
     return (
-      <article className="panel" id="report">
+      <article className={framed ? 'panel' : ''} id="report">
         <div className="panel-heading">
           <FileText size={20} aria-hidden="true" />
           <h2>{copy.titles.report}</h2>
@@ -589,7 +614,7 @@ export function ReportPanel({
   }
 
   return (
-    <article className="panel report-panel" id="report">
+    <article className={framed ? 'panel report-panel' : 'report-panel'} id="report">
       <div className="panel-heading split">
         <div>
           <FileText size={20} aria-hidden="true" />
@@ -645,57 +670,84 @@ export function ReportPanel({
 }
 
 export function TaskWorkspacePanel({
+  agentMessages = [],
+  currentTaskCase,
   currentTask,
+  deletingTaskId,
+  deviceAction,
+  devices = [],
+  report = null,
+  reportExport = createIdleReportExportAction(),
   language = 'en',
+  onCancelRun,
+  onCaseUpload,
   onCreateTask,
-  onNavigate,
+  onDeleteTask,
+  onExportMarkdown,
+  onCheckDevices,
+  onPromptChange,
+  onSelectDevice,
   onSelectTask,
+  onStartDevice,
+  onStartRun,
   onTaskDescriptionChange,
   onTaskNameChange,
+  prompt = '',
+  readiness,
+  runAction = createIdleRunAction(),
+  selectedDevice,
+  selectedDeviceId = '',
   taskAction,
   taskDescription,
+  taskEditable = Boolean(currentTask),
   taskName,
+  uploadState = createInitialUploadState(),
   tasks
 }: {
+  agentMessages?: AgentMessage[];
+  currentTaskCase?: NonNullable<TestTask['input']['testCase']>;
   currentTask: TestTask | null;
+  deletingTaskId?: string;
+  deviceAction?: DeviceActionState;
+  devices?: DeviceInfo[];
+  report?: TaskReport | null;
+  reportExport?: RunActionState;
   language?: Language;
+  onCancelRun?: () => void;
+  onCaseUpload?: (event: ChangeEvent<HTMLInputElement>) => void;
   onCreateTask: (event: FormEvent<HTMLFormElement>) => void;
-  onNavigate: (page: MenuPage) => void;
+  onDeleteTask?: (taskId: string) => void;
+  onExportMarkdown?: () => void;
+  onNavigate?: (page: MenuPage) => void;
+  onCheckDevices?: () => void;
+  onPromptChange?: (value: string) => void;
+  onSelectDevice?: (deviceId: string) => void;
   onSelectTask: (taskId: string) => void;
+  onStartDevice?: (device: DeviceInfo) => void;
+  onStartRun?: () => void;
   onTaskDescriptionChange: (value: string) => void;
   onTaskNameChange: (value: string) => void;
+  prompt?: string;
+  readiness?: RunReadiness;
+  runAction?: RunActionState;
+  selectedDevice?: DeviceInfo;
+  selectedDeviceId?: string;
   taskAction: RunActionState;
   taskDescription: string;
+  taskEditable?: boolean;
   taskName: string;
+  uploadState?: UploadState;
   tasks: TestTask[];
 }): ReactElement {
   const copy = COPY[language];
-  const detailLinks: Array<{
-    page: Extract<MenuPage, 'devices' | 'input' | 'run' | 'report'>;
-    label: string;
-    icon: ReactElement;
-  }> = [
-    {
-      page: 'devices',
-      label: copy.nav.devices,
-      icon: <Smartphone size={16} aria-hidden="true" />
-    },
-    {
-      page: 'input',
-      label: copy.nav.input,
-      icon: <UploadCloud size={16} aria-hidden="true" />
-    },
-    {
-      page: 'run',
-      label: copy.nav.run,
-      icon: <Play size={16} aria-hidden="true" />
-    },
-    {
-      page: 'report',
-      label: copy.nav.report,
-      icon: <FileText size={16} aria-hidden="true" />
-    }
-  ];
+  const taskInputMode = currentTask?.input.mode ?? 'empty';
+  const executionReadiness: RunReadiness =
+    readiness ?? {
+      canStart: false,
+      inputMode: taskInputMode,
+      reasons: [currentTask ? 'Select a connected Android or iOS device.' : 'Create a test task before execution.'],
+      ...(selectedDevice ? { selectedDevice } : {})
+    };
 
   return (
     <section className="task-workspace-layout" id="task">
@@ -751,22 +803,41 @@ export function TaskWorkspacePanel({
           <ol className="task-list" aria-label={copy.titles.taskList}>
             {tasks.map((task) => {
               const selected = currentTask?.id === task.id;
+              const deleting = deletingTaskId === task.id;
+              const deleteBlocked = isActiveTaskStatus(task.status);
 
               return (
                 <li key={task.id}>
-                  <button
-                    className={selected ? 'task-list-item active' : 'task-list-item'}
-                    type="button"
-                    aria-pressed={selected}
-                    data-task-id={task.id}
-                    onClick={() => onSelectTask(task.id)}
-                  >
-                    <span className="task-list-copy">
-                      <strong>{task.name}</strong>
-                      <small>{formatDateTime(task.updatedAt, language)}</small>
-                    </span>
-                    <StatusPill status={task.status} language={language} />
-                  </button>
+                  <div className={selected ? 'task-list-item active' : 'task-list-item'}>
+                    <button
+                      className="task-list-main"
+                      type="button"
+                      aria-pressed={selected}
+                      data-task-id={task.id}
+                      onClick={() => onSelectTask(task.id)}
+                    >
+                      <span className="task-list-copy">
+                        <strong>{task.name}</strong>
+                        <small>{formatDateTime(task.updatedAt, language)}</small>
+                      </span>
+                      <StatusPill status={task.status} language={language} />
+                    </button>
+                    <button
+                      className="icon-button compact-button danger-button"
+                      data-delete-task-id={task.id}
+                      disabled={!onDeleteTask || deleting || deleteBlocked}
+                      onClick={() => onDeleteTask?.(task.id)}
+                      title={deleteBlocked ? copy.titlesAttr.deleteRunningTask : copy.titlesAttr.deleteTask}
+                      type="button"
+                    >
+                      {deleting ? (
+                        <Loader2 className="spin" size={16} aria-hidden="true" />
+                      ) : (
+                        <Trash2 size={16} aria-hidden="true" />
+                      )}
+                      {copy.actions.deleteTask}
+                    </button>
+                  </div>
                 </li>
               );
             })}
@@ -788,7 +859,29 @@ export function TaskWorkspacePanel({
             <Activity size={20} aria-hidden="true" />
             <h2>{currentTask ? currentTask.name : copy.titles.taskDetailWorkspace}</h2>
           </div>
-          <StatusPill status={currentTask?.status ?? 'idle'} language={language} />
+          <div className="heading-actions">
+            {currentTask ? (
+              <button
+                className="icon-button compact-button danger-button"
+                disabled={!onDeleteTask || deletingTaskId === currentTask.id || isActiveTaskStatus(currentTask.status)}
+                onClick={() => onDeleteTask?.(currentTask.id)}
+                title={
+                  isActiveTaskStatus(currentTask.status)
+                    ? copy.titlesAttr.deleteRunningTask
+                    : copy.titlesAttr.deleteTask
+                }
+                type="button"
+              >
+                {deletingTaskId === currentTask.id ? (
+                  <Loader2 className="spin" size={16} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={16} aria-hidden="true" />
+                )}
+                {copy.actions.deleteTask}
+              </button>
+            ) : null}
+            <StatusPill status={currentTask?.status ?? 'idle'} language={language} />
+          </div>
         </div>
 
         {currentTask ? (
@@ -820,19 +913,150 @@ export function TaskWorkspacePanel({
                 <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
               </div>
             </dl>
-            <div className="action-row task-detail-links">
-              {detailLinks.map((link) => (
-                <button
-                  key={link.page}
-                  className="icon-button compact-button"
-                  data-page-link={link.page}
-                  type="button"
-                  onClick={() => onNavigate(link.page)}
-                >
-                  {link.icon}
-                  {link.label}
-                </button>
-              ))}
+
+            <div className="task-detail-sections">
+              <section className="task-detail-section" data-task-detail-section="devices">
+                <DeviceListPanel
+                  devices={devices}
+                  framed={false}
+                  selectedDeviceId={selectedDeviceId}
+                  onSelectDevice={onSelectDevice}
+                  onCheckDevices={onCheckDevices}
+                  onStartDevice={onStartDevice}
+                  deviceAction={deviceAction}
+                  language={language}
+                  selectionMode="select"
+                />
+              </section>
+
+              <section className="task-detail-section" data-task-detail-section="input">
+                <div className="panel-heading split">
+                  <div>
+                    <UploadCloud size={20} aria-hidden="true" />
+                    <h2>{copy.titles.taskInput}</h2>
+                  </div>
+                  <StatusPill status={executionReadiness.inputMode} language={language} />
+                </div>
+                <p className="muted">{copy.copy.inputHelp}</p>
+                <div className="input-method-grid">
+                  <div className="input-method">
+                    <div className="method-title">
+                      <UploadCloud size={18} aria-hidden="true" />
+                      <strong>{copy.copy.uploadLabel}</strong>
+                      <StatusPill status={uploadState.status} language={language} />
+                    </div>
+                    <label
+                      className={taskEditable ? 'upload-dropzone' : 'upload-dropzone disabled-dropzone'}
+                      htmlFor="case-upload"
+                    >
+                      <UploadCloud size={24} aria-hidden="true" />
+                      <strong>{uploadState.name || copy.copy.defaultCaseLabel}</strong>
+                      <span>{localizeText(uploadState.detail, language)}</span>
+                    </label>
+                    <input
+                      id="case-upload"
+                      className="visually-hidden"
+                      type="file"
+                      accept=".yaml,.yml"
+                      disabled={!taskEditable || !onCaseUpload}
+                      onChange={(event) => onCaseUpload?.(event)}
+                    />
+                  </div>
+
+                  <div className="input-method">
+                    <label className="method-title" htmlFor="prompt-input">
+                      <MessageSquare size={18} aria-hidden="true" />
+                      <strong>{copy.copy.naturalLanguageLabel}</strong>
+                    </label>
+                    <textarea
+                      id="prompt-input"
+                      className="prompt-input"
+                      value={prompt}
+                      disabled={!taskEditable}
+                      onChange={(event) => onPromptChange?.(event.target.value)}
+                      placeholder={copy.copy.promptPlaceholder}
+                    />
+                    <span className="subtle-line">{copy.copy.promptOnlyLimit}</span>
+                  </div>
+                </div>
+                {currentTaskCase ? (
+                  <dl className="metric-grid compact">
+                    <div>
+                      <dt>{copy.fields.format}</dt>
+                      <dd>{currentTaskCase.format.toUpperCase()}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.fields.imported}</dt>
+                      <dd>{formatDateTime(currentTaskCase.importedAt, language)}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </section>
+
+              <section className="task-detail-section" data-task-detail-section="progress">
+                <div className="panel-heading split">
+                  <div>
+                    <CheckCircle2 size={20} aria-hidden="true" />
+                    <h2>{copy.titles.runStatus}</h2>
+                  </div>
+                  <StatusPill status={currentTask.status} language={language} />
+                </div>
+                <div className="action-row">
+                  <button
+                    className="primary-button"
+                    disabled={!executionReadiness.canStart || runAction.status === 'busy' || !onStartRun}
+                    onClick={() => onStartRun?.()}
+                    type="button"
+                  >
+                    {runAction.status === 'busy' ? (
+                      <Loader2 className="spin" size={18} aria-hidden="true" />
+                    ) : (
+                      <Play size={18} aria-hidden="true" />
+                    )}
+                    {copy.actions.startRun}
+                  </button>
+                  {isActiveTaskStatus(currentTask.status) ? (
+                    <button
+                      className="icon-button"
+                      onClick={() => onCancelRun?.()}
+                      title={copy.titlesAttr.cancelRun}
+                      type="button"
+                    >
+                      <Ban size={18} aria-hidden="true" />
+                      {copy.actions.cancel}
+                    </button>
+                  ) : null}
+                </div>
+                <ul className="blocker-list compact">
+                  {(executionReadiness.canStart
+                    ? [`Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`]
+                    : executionReadiness.reasons
+                  ).map((reason) => (
+                    <li key={reason}>{localizeText(reason, language)}</li>
+                  ))}
+                </ul>
+                <p>{localizeText(runAction.detail, language)}</p>
+                {agentMessages.length ? (
+                  <ol className="message-list">
+                    {agentMessages.map((message) => (
+                      <li key={message.id} className={`message-row message-${message.role}`}>
+                        <strong>{copy.roles[message.role]}</strong>
+                        <span>{localizeText(message.content, language)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </section>
+
+              <section className="task-detail-section" data-task-detail-section="report">
+                <ReportPanel
+                  framed={false}
+                  report={report}
+                  exportState={reportExport}
+                  onExportMarkdown={() => onExportMarkdown?.()}
+                  language={language}
+                />
+              </section>
             </div>
           </>
         ) : (
@@ -866,6 +1090,7 @@ export function App(): ReactElement {
     status: 'idle',
     detail: 'Task has not been created.'
   });
+  const [deletingTaskId, setDeletingTaskId] = useState('');
   const [agentSession] = useState<AgentSession | null>(null);
   const [runtimeState, setRuntimeState] = useState<RunActionState>({
     status: 'idle',
@@ -904,47 +1129,59 @@ export function App(): ReactElement {
     [currentTask, devices, environment, prompt, selectedDeviceId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
-  const selectedDeviceCanExecute = Boolean(selectedDevice && isExecutableDevice(selectedDevice));
   const currentTaskCase = currentTask?.input.testCase;
+  const deviceSummary = getDeviceInspectionSummary(devices);
+  const activeTaskCount = tasks.filter((task) => isActiveTaskStatus(task.status)).length;
+  const finishedTaskCount = tasks.filter((task) => isTerminalTaskStatus(task.status)).length;
+  const latestTask = tasks[0] ?? null;
   const runtimeGeneratedAt = environment ? formatDateTime(environment.generatedAt, language) : copy.runtime.notLoaded;
   const trimmedViewerUrl = viewerUrl.trim();
   const canOpenViewer = isAllowedLocalViewerUrl(trimmedViewerUrl);
   const taskEditable = canReuseTask(currentTask);
-  const flowSteps: Array<{
-    page: MenuPage;
-    label: string;
+  const dashboardMetrics: Array<{
     detail: string;
-    done: boolean;
+    icon: ReactElement;
+    key: string;
+    label: string;
+    status: string;
+    value: string;
   }> = [
     {
-      page: 'task',
-      label: copy.titles.createTask,
-      detail: currentTask ? formatStatusLabel(currentTask.status, language) : copy.runtime.noTask,
-      done: Boolean(currentTask)
+      detail: copy.dashboard.tasksDetail(activeTaskCount, finishedTaskCount),
+      icon: <ClipboardList size={20} aria-hidden="true" />,
+      key: 'tasks-total',
+      label: copy.dashboard.tasks,
+      status: activeTaskCount ? 'running' : tasks.length ? 'ready' : 'idle',
+      value: String(tasks.length)
     },
     {
-      page: 'devices',
-      label: copy.titles.devices,
-      detail: selectedDevice?.name ?? copy.runtime.notSelected,
-      done: selectedDeviceCanExecute
+      detail: copy.runtime.deviceInspectionSummary(
+        deviceSummary.totalSupported,
+        deviceSummary.connected,
+        deviceSummary.virtual,
+        deviceSummary.physical
+      ),
+      icon: <Smartphone size={20} aria-hidden="true" />,
+      key: 'devices-connected',
+      label: copy.dashboard.devices,
+      status: deviceSummary.connected ? 'ready' : 'disconnected',
+      value: String(deviceSummary.connected)
     },
     {
-      page: 'input',
-      label: copy.titles.taskInput,
-      detail: formatStatusLabel(readiness.inputMode, language),
-      done: readiness.inputMode !== 'empty'
+      detail: latestTask ? latestTask.name : copy.empty.noTasksDetail,
+      icon: <FileText size={20} aria-hidden="true" />,
+      key: 'latest-report',
+      label: copy.dashboard.latestReport,
+      status: report?.status ?? latestTask?.status ?? 'idle',
+      value: report ? formatStatusLabel(report.status, language) : formatStatusLabel(latestTask?.status ?? 'idle', language)
     },
     {
-      page: 'run',
-      label: copy.titles.executeTest,
-      detail: currentTask?.latestRunId ?? copy.runtime.notStarted,
-      done: Boolean(currentTask?.latestRunId)
-    },
-    {
-      page: 'report',
-      label: copy.titles.report,
-      detail: report ? formatStatusLabel(report.status, language) : copy.runtime.notStarted,
-      done: Boolean(report)
+      detail: environment?.canStartRun ? copy.dashboard.readyToRun : (environment?.blockers[0] ?? copy.runtime.notLoaded),
+      icon: <Activity size={20} aria-hidden="true" />,
+      key: 'runtime-readiness',
+      label: copy.dashboard.runtime,
+      status: environment?.canStartRun ? 'ready' : runtimeState.status,
+      value: environment?.canStartRun ? copy.dashboard.ready : copy.dashboard.blocked
     }
   ];
   const navigationItems: Array<{
@@ -968,74 +1205,9 @@ export function App(): ReactElement {
       icon: <Smartphone size={18} aria-hidden="true" />
     },
     {
-      page: 'input',
-      label: copy.nav.input,
-      icon: <UploadCloud size={18} aria-hidden="true" />
-    },
-    {
-      page: 'run',
-      label: copy.nav.run,
-      icon: <Play size={18} aria-hidden="true" />
-    },
-    {
-      page: 'report',
-      label: copy.nav.report,
-      icon: <FileText size={18} aria-hidden="true" />
-    },
-    {
       page: 'viewer',
       label: copy.nav.viewer,
       icon: <MonitorSmartphone size={18} aria-hidden="true" />
-    }
-  ];
-  const menuCards: Array<{
-    page: MenuPage;
-    label: string;
-    detail: string;
-    status: string;
-    icon: ReactElement;
-  }> = [
-    {
-      page: 'task',
-      label: copy.titles.createTask,
-      detail: currentTask ? currentTask.name : copy.runtime.noTask,
-      status: currentTask?.status ?? 'idle',
-      icon: <ClipboardList size={20} aria-hidden="true" />
-    },
-    {
-      page: 'devices',
-      label: copy.titles.devices,
-      detail: selectedDevice?.name ?? copy.runtime.notSelected,
-      status: selectedDeviceCanExecute ? 'ready' : 'disconnected',
-      icon: <Smartphone size={20} aria-hidden="true" />
-    },
-    {
-      page: 'input',
-      label: copy.titles.taskInput,
-      detail: formatStatusLabel(readiness.inputMode, language),
-      status: readiness.inputMode,
-      icon: <UploadCloud size={20} aria-hidden="true" />
-    },
-    {
-      page: 'run',
-      label: copy.titles.executeTest,
-      detail: currentTask?.latestRunId ?? copy.runtime.notStarted,
-      status: currentTask?.status ?? runAction.status,
-      icon: <Play size={20} aria-hidden="true" />
-    },
-    {
-      page: 'report',
-      label: copy.titles.report,
-      detail: report ? formatStatusLabel(report.status, language) : copy.runtime.notStarted,
-      status: report?.status ?? 'idle',
-      icon: <FileText size={20} aria-hidden="true" />
-    },
-    {
-      page: 'viewer',
-      label: copy.titles.viewer,
-      detail: canOpenViewer ? trimmedViewerUrl : copy.copy.viewerUrlMustBeLocal,
-      status: viewerProbe.status,
-      icon: <MonitorSmartphone size={20} aria-hidden="true" />
     }
   ];
 
@@ -1189,6 +1361,62 @@ export function App(): ReactElement {
         status: 'error',
         detail: getErrorMessage(error)
       });
+    }
+  }
+
+  async function handleDeleteTask(taskId: string): Promise<void> {
+    const task = tasks.find((candidate) => candidate.id === taskId);
+
+    if (!task) {
+      return;
+    }
+
+    if (isActiveTaskStatus(task.status)) {
+      setTaskAction({
+        status: 'error',
+        detail: `Task ${task.id} is ${formatStatusLabel(task.status, 'en')}.`
+      });
+      return;
+    }
+
+    const confirmed =
+      typeof window.confirm === 'function' ? window.confirm(copy.copy.deleteTaskConfirm(task.name)) : true;
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingTaskId(task.id);
+    setTaskAction({
+      status: 'busy',
+      detail: `Deleting ${task.id}.`
+    });
+
+    try {
+      const deletedTask = await api.tasks.delete(task.id);
+      const nextTasks = tasks.filter((candidate) => candidate.id !== deletedTask.id);
+
+      setTasks(nextTasks);
+      setSelectedTaskId((currentSelectedTaskId) =>
+        currentSelectedTaskId === deletedTask.id ? nextTasks[0]?.id ?? '' : currentSelectedTaskId
+      );
+      setTaskWorkspaceById((current) => {
+        const next = { ...current };
+
+        delete next[deletedTask.id];
+        return next;
+      });
+      setTaskAction({
+        status: 'success',
+        detail: `Task ${deletedTask.id} deleted.`
+      });
+    } catch (error) {
+      setTaskAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
+    } finally {
+      setDeletingTaskId('');
     }
   }
 
@@ -1686,30 +1914,28 @@ export function App(): ReactElement {
           <small>{copy.runtime.generated(runtimeGeneratedAt)}</small>
         </div>
 
-        <section className="flow-strip" aria-label={copy.titles.testFlow}>
-          {flowSteps.map((step, index) => (
-            <button
-              key={step.page}
-              className={[
-                'flow-step',
-                step.done ? 'complete' : '',
-                activePage === step.page ? 'active' : ''
-              ].filter(Boolean).join(' ')}
-              data-target-page={step.page}
-              type="button"
-              onClick={() => setActivePage(step.page)}
-            >
-              <span className="flow-index">{index + 1}</span>
-              <span>
-                <strong>{step.label}</strong>
-                <small>{step.detail}</small>
-              </span>
-            </button>
-          ))}
-        </section>
-
         {activePage === 'overview' ? (
           <section className="workspace-page overview-page" data-page="overview">
+            <section className="dashboard-grid" aria-label={copy.dashboard.label}>
+              {dashboardMetrics.map((metric) => (
+                <article
+                  key={metric.key}
+                  className="panel dashboard-card"
+                  data-dashboard-metric={metric.key}
+                >
+                  <div className="panel-heading split">
+                    <div>
+                      {metric.icon}
+                      <h2>{metric.label}</h2>
+                    </div>
+                    <StatusPill status={metric.status} language={language} />
+                  </div>
+                  <strong className="dashboard-value">{metric.value}</strong>
+                  <p>{localizeText(metric.detail, language)}</p>
+                </article>
+              ))}
+            </section>
+
             <section className="panel-grid three">
               <ServiceStatusCard
                 icon={<Cable size={20} aria-hidden="true" />}
@@ -1737,25 +1963,6 @@ export function App(): ReactElement {
                 language={language}
               />
             </section>
-
-            <section className="menu-card-grid" aria-label={copy.shell.navigationLabel}>
-              {menuCards.map((card) => (
-                <button
-                  key={card.page}
-                  className="menu-card"
-                  data-target-page={card.page}
-                  type="button"
-                  onClick={() => setActivePage(card.page)}
-                >
-                  <span className="menu-card-icon">{card.icon}</span>
-                  <span className="menu-card-copy">
-                    <strong>{card.label}</strong>
-                    <small>{card.detail}</small>
-                  </span>
-                  <StatusPill status={card.status} language={language} />
-                </button>
-              ))}
-            </section>
           </section>
         ) : null}
 
@@ -1763,15 +1970,37 @@ export function App(): ReactElement {
           <section className="workspace-page" data-page="task">
             <TaskWorkspacePanel
               currentTask={currentTask}
+              currentTaskCase={currentTaskCase}
+              deletingTaskId={deletingTaskId}
+              deviceAction={deviceAction}
+              devices={devices}
+              report={report}
+              reportExport={reportExport}
               language={language}
+              onCancelRun={() => void handleCancelRun()}
+              onCaseUpload={(event) => void handleCaseUpload(event)}
               onCreateTask={(event) => void handleCreateTask(event)}
-              onNavigate={setActivePage}
+              onCheckDevices={() => void handleCheckDevices()}
+              onDeleteTask={(taskId) => void handleDeleteTask(taskId)}
+              onExportMarkdown={() => void handleExportReport()}
+              onPromptChange={(value) => updateCurrentTaskWorkspaceState({ prompt: value })}
+              onSelectDevice={handleSelectDevice}
               onSelectTask={handleSelectTask}
+              onStartDevice={(device) => void handleStartDevice(device)}
+              onStartRun={() => void handleStartRun()}
               onTaskDescriptionChange={setTaskDescription}
               onTaskNameChange={setTaskName}
+              prompt={prompt}
+              readiness={readiness}
+              runAction={runAction}
+              selectedDevice={selectedDevice}
+              selectedDeviceId={selectedDeviceId}
               taskAction={taskAction}
               taskDescription={taskDescription}
+              taskEditable={taskEditable}
               taskName={taskName}
+              uploadState={uploadState}
+              agentMessages={agentMessages}
               tasks={tasks}
             />
           </section>
@@ -1781,180 +2010,12 @@ export function App(): ReactElement {
           <section className="workspace-page" data-page="devices">
             <DeviceListPanel
               devices={devices}
-              selectedDeviceId={selectedDeviceId}
-              onSelectDevice={handleSelectDevice}
               onCheckDevices={() => void handleCheckDevices()}
               onStartDevice={(device) => void handleStartDevice(device)}
               deviceAction={deviceAction}
               language={language}
+              selectionMode="manage"
             />
-          </section>
-        ) : null}
-
-        {activePage === 'input' ? (
-          <section className="workspace-page" data-page="input">
-          <article className="panel input-panel" id="input">
-            <div className="panel-heading split">
-              <div>
-                <UploadCloud size={20} aria-hidden="true" />
-                <h2>{copy.titles.taskInput}</h2>
-              </div>
-              <StatusPill status={readiness.inputMode} language={language} />
-            </div>
-            <p className="muted">{copy.copy.inputHelp}</p>
-            <div className="input-method-grid">
-              <div className="input-method">
-                <div className="method-title">
-                  <UploadCloud size={18} aria-hidden="true" />
-                  <strong>{copy.copy.uploadLabel}</strong>
-                  <StatusPill status={uploadState.status} language={language} />
-                </div>
-                <label
-                  className={taskEditable ? 'upload-dropzone' : 'upload-dropzone disabled-dropzone'}
-                  htmlFor="case-upload"
-                >
-                  <UploadCloud size={24} aria-hidden="true" />
-                  <strong>{uploadState.name || copy.copy.defaultCaseLabel}</strong>
-                  <span>{localizeText(uploadState.detail, language)}</span>
-                </label>
-                <input
-                  id="case-upload"
-                  className="visually-hidden"
-                  type="file"
-                  accept=".yaml,.yml"
-                  disabled={!taskEditable}
-                  onChange={(event) => void handleCaseUpload(event)}
-                />
-              </div>
-
-              <div className="input-method">
-                <label className="method-title" htmlFor="prompt-input">
-                  <MessageSquare size={18} aria-hidden="true" />
-                  <strong>{copy.copy.naturalLanguageLabel}</strong>
-                </label>
-                <textarea
-                  id="prompt-input"
-                  className="prompt-input"
-                  value={prompt}
-                  disabled={!taskEditable}
-                  onChange={(event) => updateCurrentTaskWorkspaceState({ prompt: event.target.value })}
-                  placeholder={copy.copy.promptPlaceholder}
-                />
-                <span className="subtle-line">{copy.copy.promptOnlyLimit}</span>
-              </div>
-            </div>
-            {currentTaskCase ? (
-              <dl className="metric-grid compact">
-                <div>
-                  <dt>{copy.fields.format}</dt>
-                  <dd>{currentTaskCase.format.toUpperCase()}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.imported}</dt>
-                  <dd>{formatDateTime(currentTaskCase.importedAt, language)}</dd>
-                </div>
-              </dl>
-            ) : null}
-          </article>
-          </section>
-        ) : null}
-
-        {activePage === 'run' ? (
-          <section className="workspace-page" data-page="run">
-          <article className="panel run-panel" id="run">
-            <div className="panel-heading split">
-              <div>
-                <CheckCircle2 size={20} aria-hidden="true" />
-                <h2>{copy.titles.executeTest}</h2>
-              </div>
-              <StatusPill status={currentTask?.status ?? runAction.status} language={language} />
-            </div>
-            <button
-              className="primary-button"
-              disabled={!readiness.canStart || runAction.status === 'busy'}
-              onClick={() => void handleStartRun()}
-            >
-              {runAction.status === 'busy' ? (
-                <Loader2 className="spin" size={18} aria-hidden="true" />
-              ) : (
-                <Play size={18} aria-hidden="true" />
-              )}
-              {copy.actions.startRun}
-            </button>
-            {currentTask && isActiveTaskStatus(currentTask.status) ? (
-              <button
-                className="icon-button"
-                onClick={() => void handleCancelRun()}
-                title={copy.titlesAttr.cancelRun}
-              >
-                <Ban size={18} aria-hidden="true" />
-                {copy.actions.cancel}
-              </button>
-            ) : null}
-            <ul className="blocker-list compact">
-              {(readiness.canStart
-                ? [`Ready for ${selectedDevice?.name ?? copy.runtime.selectedDevice}.`]
-                : readiness.reasons
-              ).map((reason) => (
-                <li key={reason}>{localizeText(reason, language)}</li>
-              ))}
-            </ul>
-            <p>{localizeText(runAction.detail, language)}</p>
-            {currentTask ? (
-              <dl className="metric-grid">
-                <div>
-                  <dt>{copy.fields.task}</dt>
-                  <dd>{currentTask.id}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.run}</dt>
-                  <dd>{currentTask.latestRunId ?? copy.runtime.notStarted}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.case}</dt>
-                  <dd>{currentTask.input.testCase?.name ?? currentTask.input.mode}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.device}</dt>
-                  <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
-                </div>
-                <div>
-                  <dt>{copy.fields.updated}</dt>
-                  <dd>{formatDateTime(currentTask.updatedAt, language)}</dd>
-                </div>
-              </dl>
-            ) : (
-              <div className="empty-state">
-                <AlertTriangle aria-hidden="true" size={20} />
-                <div>
-                  <strong>{copy.empty.waitingRunTitle}</strong>
-                  <span>{copy.empty.waitingRunDetail}</span>
-                </div>
-              </div>
-            )}
-
-            {agentMessages.length ? (
-              <ol className="message-list">
-                {agentMessages.map((message) => (
-                  <li key={message.id} className={`message-row message-${message.role}`}>
-                    <strong>{copy.roles[message.role]}</strong>
-                    <span>{localizeText(message.content, language)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </article>
-          </section>
-        ) : null}
-
-        {activePage === 'report' ? (
-          <section className="workspace-page" data-page="report">
-          <ReportPanel
-            report={report}
-            exportState={reportExport}
-            onExportMarkdown={() => void handleExportReport()}
-            language={language}
-          />
           </section>
         ) : null}
 

@@ -181,6 +181,49 @@ describe('TaskService', () => {
     expect(secondTask?.id).toBe(olderTask.id);
   });
 
+  it('deletes a draft task from the manifest and local task workspace', async () => {
+    const { storage, tasks } = await createTaskServices();
+    const deletedTask = await tasks.create({ name: 'Delete me' });
+    const keptTask = await tasks.create({ name: 'Keep me' });
+
+    await expect(readFile(storage.getTaskWorkspace(deletedTask.id).taskPath, 'utf8')).resolves.toContain(
+      'Delete me'
+    );
+
+    await expect(tasks.delete({ taskId: deletedTask.id })).resolves.toMatchObject({
+      id: deletedTask.id,
+      name: 'Delete me'
+    });
+
+    await expect(tasks.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: keptTask.id,
+        name: 'Keep me'
+      })
+    ]);
+    await expect(readFile(storage.getTaskWorkspace(deletedTask.id).taskPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT'
+    });
+  });
+
+  it('does not delete an active running task workspace', async () => {
+    const { rootDir, tasks } = await createTaskServices();
+    const sourcePath = join(rootDir, 'running.yaml');
+    const task = await tasks.create({ name: 'Running task' });
+
+    await writeFile(sourcePath, 'appId: com.example.app\n- launchApp\n', 'utf8');
+    const readyTask = await tasks.importCase({ taskId: task.id, sourcePath });
+    const queuedTask = await tasks.start({
+      taskId: readyTask.id,
+      deviceId: connectedDevice.id
+    });
+
+    await expect(tasks.delete({ taskId: queuedTask.id })).rejects.toMatchObject({
+      code: 'TASK_DELETE_BLOCKED',
+      message: expect.stringContaining('running')
+    });
+  });
+
   it('imports YAML cases into the task workspace and keeps the task ready', async () => {
     const { rootDir, tasks } = await createTaskServices();
     const sourcePath = join(rootDir, 'smoke.yaml');

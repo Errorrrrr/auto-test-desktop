@@ -278,6 +278,24 @@ h2 {
   white-space: nowrap;
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dashboard-card {
+  min-height: 150px;
+}
+
+.dashboard-value {
+  display: block;
+  color: #18212f;
+  font-size: 30px;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
 .flow-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -494,8 +512,6 @@ h2 {
   border-radius: 8px;
   color: #203047;
   background: #f8fbff;
-  cursor: pointer;
-  font: inherit;
   text-align: left;
 }
 
@@ -503,6 +519,22 @@ h2 {
 .task-list-item:hover {
   border-color: #256d64;
   background: #f2fbf7;
+}
+
+.task-list-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .task-list-copy {
@@ -522,8 +554,17 @@ h2 {
   font-size: 12px;
 }
 
-.task-detail-links {
-  flex-wrap: wrap;
+.task-detail-sections {
+  display: grid;
+  gap: 16px;
+}
+
+.task-detail-section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid #e3e9f2;
 }
 
 .field-label {
@@ -580,6 +621,12 @@ h2 {
   padding: 0 12px;
   color: #203047;
   background: #ffffff;
+}
+
+.danger-button {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fff7f7;
 }
 
 .primary-button {
@@ -699,7 +746,15 @@ h2 {
   min-width: 0;
 }
 
+.device-row-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .device-row label > span,
+.device-row-info > span,
 .message-row span {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -845,7 +900,7 @@ h2 {
   }
 
   .nav-list {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .nav-item {
@@ -859,6 +914,7 @@ h2 {
 
   .panel-grid.three,
   .panel-grid.two,
+  .dashboard-grid,
   .flow-strip,
   .input-method-grid,
   .menu-card-grid,

@@ -337,6 +337,7 @@ export interface AppAutoTestApi {
     create: (request: TaskCreateRequest) => Promise<TestTask>;
     list: () => Promise<TestTask[]>;
     get: (taskId: string) => Promise<TestTask>;
+    delete: (taskId: string) => Promise<TestTask>;
     updateInput: (request: TaskUpdateInputRequest) => Promise<TestTask>;
     importCase: (request: TaskImportCaseRequest) => Promise<TestTask>;
     start: (request: TaskStartRequest) => Promise<TestTask>;

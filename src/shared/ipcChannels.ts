@@ -26,6 +26,7 @@ export const IPC_CHANNELS = {
     create: 'tasks:create',
     list: 'tasks:list',
     get: 'tasks:get',
+    delete: 'tasks:delete',
     updateInput: 'tasks:update-input',
     importCase: 'tasks:import-case',
     start: 'tasks:start',

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 
 import type {
   DeviceInfo,
@@ -166,6 +166,24 @@ export class TaskService {
     const taskId = requireStringField(request, 'taskId');
 
     return this.syncTaskWithLatestRun(await this.getTask(taskId));
+  }
+
+  async delete(request: unknown): Promise<TestTask> {
+    const taskId = requireStringField(request, 'taskId');
+    const task = await this.getTask(taskId);
+
+    if (task.status === 'queued' || task.status === 'running') {
+      throw new AppError(
+        'TASK_DELETE_BLOCKED',
+        `Task ${task.id} is ${task.status}; stop the running task before deleting it.`
+      );
+    }
+
+    await this.storage.ensure();
+    await this.storage.getTaskStore().delete(task.id);
+    await rm(this.storage.getTaskWorkspace(task.id).rootDir, { force: true, recursive: true });
+
+    return task;
   }
 
   async updateInput(request: unknown): Promise<TestTask> {
