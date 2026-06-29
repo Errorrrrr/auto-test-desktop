@@ -102,6 +102,8 @@ export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerP
 const EXECUTABLE_PLATFORMS = new Set(['android', 'ios']);
 const VIRTUAL_DEVICE_TYPES = new Set(['emulator', 'simulator']);
 const ACTIVE_TASK_STATUSES = new Set<TestTaskStatus>(['queued', 'running']);
+const SUCCESS_TASK_STATUSES = new Set<TestTaskStatus>(['succeeded', 'cancelled']);
+const ERROR_TASK_STATUSES = new Set<TestTaskStatus>(['failed', 'timeout', 'blocked']);
 
 export function isExecutableDevice(device: DeviceInfo): boolean {
   return EXECUTABLE_PLATFORMS.has(device.platform) && device.connected;
@@ -117,6 +119,22 @@ export function isVirtualDevice(device: DeviceInfo): boolean {
 
 export function isStartableDevice(device: DeviceInfo): boolean {
   return isVirtualDevice(device) && !device.connected && device.launchable === true;
+}
+
+export function getRunActionStatusForTaskStatus(status: TestTaskStatus): AsyncStatus {
+  if (ACTIVE_TASK_STATUSES.has(status)) {
+    return 'busy';
+  }
+
+  if (SUCCESS_TASK_STATUSES.has(status)) {
+    return 'success';
+  }
+
+  if (ERROR_TASK_STATUSES.has(status)) {
+    return 'error';
+  }
+
+  return 'idle';
 }
 
 export function isStoppableDevice(device: DeviceInfo): boolean {

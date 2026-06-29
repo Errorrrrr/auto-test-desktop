@@ -18,6 +18,7 @@ import {
   getCurrentTaskAfterRefresh,
   getDeviceInspectionSummary,
   getPreferredDeviceId,
+  getRunActionStatusForTaskStatus,
   getRunReadiness,
   getSelectedTaskAfterRefresh,
   hasStartedDeviceAppeared,
@@ -141,6 +142,14 @@ function createEnvironment(overrides: Partial<EnvironmentStatus> = {}): Environm
 }
 
 describe('workbench run readiness', () => {
+  it('keeps queued and running run actions busy until the task reaches a terminal status', () => {
+    expect(getRunActionStatusForTaskStatus('queued')).toBe('busy');
+    expect(getRunActionStatusForTaskStatus('running')).toBe('busy');
+    expect(getRunActionStatusForTaskStatus('succeeded')).toBe('success');
+    expect(getRunActionStatusForTaskStatus('failed')).toBe('error');
+    expect(getRunActionStatusForTaskStatus('blocked')).toBe('error');
+  });
+
   it('blocks execution until a test task exists', () => {
     const readiness = getRunReadiness({
       environment: createEnvironment(),

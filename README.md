@@ -60,7 +60,7 @@ RUN_TIMEOUT_MS=300000
 MAX_UPLOAD_SIZE_MB=25
 ```
 
-`AGENT_PROVIDER=codex` is the task execution path. The desktop app delegates uploaded YAML and natural-language task runs to `codex exec`; Codex is expected to use its configured Maestro MCP tools to drive the selected Android or iOS device.
+`AGENT_PROVIDER=codex` is the task execution path. The desktop app delegates uploaded YAML and natural-language task runs to `codex exec`; Codex uses an isolated Maestro MCP configuration injected by the app to drive the selected Android or iOS device.
 
 ## Local Adapters And Storage
 
@@ -79,7 +79,7 @@ AGENT_CODEX_SERVICE_TIER=fast
 
 Device discovery combines `adb devices -l` and `xcrun simctl list devices --json`. Android/iOS entries with `connected=false` are still shown, but run start remains blocked until a connected Android or iOS device is available.
 
-Agent integration currently supports Codex CLI for non-interactive task execution. `AGENT_PROVIDER=codex` checks that `AGENT_COMMAND` is installed and then runs `codex exec` with the selected device, optional App ID, uploaded YAML path, and/or natural-language instruction. `AGENT_CODEX_SERVICE_TIER` defaults to `fast` so older Codex configs with `service_tier = "default"` do not block test execution; set it to `flex` when needed. `AGENT_PROVIDER=manual` and `manual-ready` keep run start blocked because they cannot execute tests.
+Agent integration currently supports Codex CLI for non-interactive task execution. `AGENT_PROVIDER=codex` checks that `AGENT_COMMAND` is installed and then runs `codex exec` with the selected device, optional App ID, uploaded YAML path, and/or natural-language instruction. The Codex child process is started with `--ignore-user-config` and an explicit `maestro mcp` server based on `MAESTRO_CLI_PATH`, so unrelated user MCP servers cannot fail the test run during startup. `AGENT_CODEX_SERVICE_TIER` defaults to `fast` so older Codex configs with `service_tier = "default"` do not block test execution; set it to `flex` when needed. `AGENT_PROVIDER=manual` and `manual-ready` keep run start blocked because they cannot execute tests.
 
 Natural-language-only task runs are passed directly to Codex. `MAESTRO_APP_ID`, a task Target App ID, or an appId in the prompt is optional launch context for Codex/Maestro MCP rather than a local pre-generation requirement.
 

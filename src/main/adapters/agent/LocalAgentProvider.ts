@@ -14,6 +14,7 @@ interface LocalAgentProviderOptions {
   codexServiceTier?: 'fast' | 'flex';
   command?: string;
   execFile?: ExecFile;
+  maestroMcpCommand?: string;
   provider?: string;
 }
 
@@ -21,6 +22,7 @@ export class LocalAgentProvider implements AgentProvider {
   private readonly codexServiceTier: 'fast' | 'flex';
   private readonly command?: string;
   private readonly execFile: ExecFile;
+  private readonly maestroMcpCommand: string;
   private readonly provider: string;
 
   constructor(options: LocalAgentProviderOptions = {}) {
@@ -28,6 +30,7 @@ export class LocalAgentProvider implements AgentProvider {
     this.command = options.command ?? (this.provider === 'codex' ? 'codex' : undefined);
     this.codexServiceTier = options.codexServiceTier ?? 'fast';
     this.execFile = options.execFile ?? nodeExecFile;
+    this.maestroMcpCommand = options.maestroMcpCommand ?? 'maestro';
   }
 
   async health(): Promise<ServiceHealth> {
@@ -112,9 +115,16 @@ export class LocalAgentProvider implements AgentProvider {
     const args = [
       '-c',
       `service_tier="${this.codexServiceTier}"`,
+      '-c',
+      'mcp_servers.maestro.enabled=true',
+      '-c',
+      `mcp_servers.maestro.command=${toTomlString(this.maestroMcpCommand)}`,
+      '-c',
+      'mcp_servers.maestro.args=["mcp"]',
       '--ask-for-approval',
       'never',
       'exec',
+      '--ignore-user-config',
       '--cd',
       process.cwd(),
       '--sandbox',
@@ -154,6 +164,14 @@ function buildCodexExecutionPrompt(request: AgentTestExecutionRequest): string {
     'You are executing a mobile app automation test for the desktop test client.',
     'Use the configured Maestro MCP tools to run the test. Do not execute the local maestro CLI.',
     'The app will read your final answer to determine the run result.',
+    'Do not report success after only launching or opening the app.',
+    'If the app was only launched/opened, no Maestro-driven instruction steps ran, or the requested outcome was not verified, report TEST_RESULT: failed.',
+    'Before the final TEST_RESULT marker, include these evidence markers:',
+    'TEST_NON_LAUNCH_ACTIONS_EXECUTED: <number of Maestro-driven user interactions completed after app launch/open>',
+    'TEST_ASSERTIONS_PASSED: <number of explicit assertions or observations verifying the requested non-launch outcome>',
+    'TEST_INSTRUCTION_COMPLETED: yes or no',
+    'Launch/open/wait steps do not count toward TEST_NON_LAUNCH_ACTIONS_EXECUTED or TEST_ASSERTIONS_PASSED.',
+    'For TEST_RESULT: passed, TEST_NON_LAUNCH_ACTIONS_EXECUTED and TEST_ASSERTIONS_PASSED must both be greater than zero, and TEST_INSTRUCTION_COMPLETED must be yes.',
     'End your final answer with exactly one result marker: TEST_RESULT: passed or TEST_RESULT: failed.',
     '',
     'Target device:',
@@ -202,13 +220,6 @@ function parseCodexResult(
   stderr: string
 ): Pick<AgentTestExecutionResult, 'status' | 'failureReason'> {
   const combined = `${stdout}\n${stderr}`;
-
-  if (/TEST_RESULT:\s*(passed|pass|success|succeeded)\b/i.test(combined)) {
-    return {
-      status: 'succeeded'
-    };
-  }
-
   const failed = combined.match(/TEST_RESULT:\s*(failed|fail|failure|blocked|error)\b/i);
 
   if (failed) {
@@ -218,8 +229,50 @@ function parseCodexResult(
     };
   }
 
+  if (/TEST_RESULT:\s*(passed|pass|success|succeeded)\b/i.test(combined)) {
+    const evidenceFailureReason = getExecutionEvidenceFailureReason(combined);
+
+    if (evidenceFailureReason) {
+      return {
+        status: 'failed',
+        failureReason: evidenceFailureReason
+      };
+    }
+
+    return {
+      status: 'succeeded'
+    };
+  }
+
   return {
     status: 'failed',
     failureReason: 'Codex did not report a TEST_RESULT marker, so the test outcome is unknown.'
   };
+}
+
+function getExecutionEvidenceFailureReason(output: string): string | undefined {
+  const actions = parseNonNegativeIntegerMarker(output, 'TEST_NON_LAUNCH_ACTIONS_EXECUTED');
+  const assertions = parseNonNegativeIntegerMarker(output, 'TEST_ASSERTIONS_PASSED');
+  const instructionCompleted = output.match(/TEST_INSTRUCTION_COMPLETED:\s*(yes|no)\b/i)?.[1]?.toLowerCase();
+
+  if (actions === undefined || assertions === undefined || !instructionCompleted) {
+    return 'Codex reported TEST_RESULT: passed without required non-launch execution evidence.';
+  }
+
+  if (actions < 1 || assertions < 1 || instructionCompleted !== 'yes') {
+    return 'Codex reported TEST_RESULT: passed, but the non-launch execution evidence does not show completed actions and verification.';
+  }
+
+  return undefined;
+}
+
+function parseNonNegativeIntegerMarker(output: string, marker: string): number | undefined {
+  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = output.match(new RegExp(`${escapedMarker}:\\s*(\\d+)\\b`, 'i'));
+
+  return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+function toTomlString(value: string): string {
+  return JSON.stringify(value);
 }

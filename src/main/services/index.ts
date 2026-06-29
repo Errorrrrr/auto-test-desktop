@@ -51,6 +51,7 @@ export function createDefaultServices(options: {
     new LocalAgentProvider({
       codexServiceTier: config.agentCodexServiceTier,
       command: config.agentCommand,
+      maestroMcpCommand: config.maestroCliPath,
       provider: config.agentProvider
     });
   const viewer = new ViewerService({ env: options.env });

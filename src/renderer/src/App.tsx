@@ -59,6 +59,7 @@ import {
   getErrorMessage,
   getExecutableDevices,
   getPreferredDeviceId,
+  getRunActionStatusForTaskStatus,
   getReportFormatLabel,
   getRunReadiness,
   getSelectedTaskAfterRefresh,
@@ -2122,13 +2123,10 @@ export function App(): ReactElement {
       }));
 
       if (isTerminalTaskStatus(latestTask.status)) {
-        const completedWithoutFailure =
-          latestTask.status === 'succeeded' || latestTask.status === 'cancelled';
-
         updateTaskWorkspaceState(taskId, (current) => ({
           ...current,
           runAction: {
-            status: completedWithoutFailure ? 'success' : 'error',
+            status: getRunActionStatusForTaskStatus(latestTask.status),
             detail: `Task ${latestTask.id} finished as ${formatStatusLabel(latestTask.status, 'en')}.`
           }
         }));
@@ -2209,7 +2207,7 @@ export function App(): ReactElement {
         ...current,
         report: nextReport,
         runAction: {
-          status: startedTask.status === 'failed' || startedTask.status === 'blocked' ? 'error' : 'success',
+          status: getRunActionStatusForTaskStatus(startedTask.status),
           detail: `Task ${startedTask.id} is ${formatStatusLabel(startedTask.status, 'en')}.`
         }
       }));

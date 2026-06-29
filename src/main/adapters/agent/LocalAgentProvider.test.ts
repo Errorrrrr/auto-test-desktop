@@ -37,7 +37,11 @@ describe('LocalAgentProvider', () => {
         return { stdout: '/usr/local/bin/codex\n', stderr: '' };
       }
 
-      return { stdout: 'Maestro MCP run completed.\nTEST_RESULT: passed\n', stderr: '' };
+      return {
+        stdout:
+          'Maestro MCP run completed.\nTEST_NON_LAUNCH_ACTIONS_EXECUTED: 3\nTEST_ASSERTIONS_PASSED: 1\nTEST_INSTRUCTION_COMPLETED: yes\nTEST_RESULT: passed\n',
+        stderr: ''
+      };
     };
     const provider = new LocalAgentProvider({
       command: 'codex',
@@ -76,7 +80,10 @@ describe('LocalAgentProvider', () => {
       args: expect.arrayContaining([
         '-c',
         'service_tier="fast"',
+        'mcp_servers.maestro.command="maestro"',
+        'mcp_servers.maestro.args=["mcp"]',
         'exec',
+        '--ignore-user-config',
         '--sandbox',
         'workspace-write',
         '--ask-for-approval',
@@ -85,9 +92,110 @@ describe('LocalAgentProvider', () => {
     });
     expect(calls[1]?.args.indexOf('-c')).toBeLessThan(calls[1]?.args.indexOf('exec'));
     expect(calls[1]?.args.indexOf('--ask-for-approval')).toBeLessThan(calls[1]?.args.indexOf('exec'));
+    expect(calls[1]?.args.indexOf('--ignore-user-config')).toBeGreaterThan(calls[1]?.args.indexOf('exec'));
     expect(calls[1]?.args.at(-1)).toBe('-');
     expect(calls[1]?.options?.input).toContain('Use the configured Maestro MCP tools');
     expect(calls[1]?.options?.input).toContain('/tmp/smoke.yaml');
+    expect(calls[1]?.options?.input).toContain('Do not report success after only launching or opening the app');
+    expect(calls[1]?.options?.input).toContain('Launch/open/wait steps do not count');
+  });
+
+  it('injects a custom Maestro MCP command into the isolated Codex execution config', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const execFile: ExecFile = async (file, args) => {
+      calls.push({ file, args });
+
+      return {
+        stdout:
+          'TEST_NON_LAUNCH_ACTIONS_EXECUTED: 2\nTEST_ASSERTIONS_PASSED: 1\nTEST_INSTRUCTION_COMPLETED: yes\nTEST_RESULT: passed\n',
+        stderr: ''
+      };
+    };
+    const provider = new LocalAgentProvider({
+      command: 'codex',
+      execFile,
+      maestroMcpCommand: '/opt/homebrew/bin/maestro',
+      provider: 'codex'
+    });
+
+    await expect(
+      provider.runTest({
+        device: {
+          id: 'emulator-5554',
+          name: 'Pixel',
+          platform: 'android',
+          type: 'emulator',
+          connected: true
+        },
+        prompt: '进入我的页面',
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      status: 'succeeded'
+    });
+
+    expect(calls[0]?.args).toEqual(
+      expect.arrayContaining(['mcp_servers.maestro.command="/opt/homebrew/bin/maestro"'])
+    );
+  });
+
+  it('fails Codex runs that report passed without execution evidence', async () => {
+    const execFile: ExecFile = async () => ({
+      stdout: 'launchApp completed\nTEST_RESULT: passed\n',
+      stderr: ''
+    });
+    const provider = new LocalAgentProvider({
+      command: 'codex',
+      execFile,
+      provider: 'codex'
+    });
+
+    await expect(
+      provider.runTest({
+        device: {
+          id: 'emulator-5554',
+          name: 'Pixel',
+          platform: 'android',
+          type: 'emulator',
+          connected: true
+        },
+        prompt: '点击登录并确认进入首页',
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      failureReason: expect.stringContaining('execution evidence')
+    });
+  });
+
+  it('fails Codex runs that count only launchApp as execution evidence', async () => {
+    const execFile: ExecFile = async () => ({
+      stdout:
+        'launchApp completed\nTEST_ACTIONS_EXECUTED: 1\nTEST_ASSERTIONS_PASSED: 1\nTEST_INSTRUCTION_COMPLETED: yes\nTEST_RESULT: passed\n',
+      stderr: ''
+    });
+    const provider = new LocalAgentProvider({
+      command: 'codex',
+      execFile,
+      provider: 'codex'
+    });
+
+    await expect(
+      provider.runTest({
+        device: {
+          id: 'emulator-5554',
+          name: 'Pixel',
+          platform: 'android',
+          type: 'emulator',
+          connected: true
+        },
+        prompt: '点击登录并确认进入首页',
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      failureReason: expect.stringContaining('non-launch')
+    });
   });
 
   it('fails Codex runs that exit without the required result marker', async () => {
