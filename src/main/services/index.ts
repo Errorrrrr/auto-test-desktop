@@ -49,11 +49,30 @@ export function createDefaultServices(options: {
   const agentProvider =
     options.agentProvider ??
     new LocalAgentProvider({
+      codexServiceTier: config.agentCodexServiceTier,
       command: config.agentCommand,
       provider: config.agentProvider
     });
-  const devices = new DeviceService({ provider: maestroProvider });
   const viewer = new ViewerService({ env: options.env });
+  const devices = new DeviceService({
+    provider: maestroProvider,
+    webDeviceProvider: () => {
+      const viewerConfig = viewer.getConfig();
+
+      if (!viewerConfig.allowed) {
+        return undefined;
+      }
+
+      return {
+        id: 'web-viewer',
+        name: 'Web Viewer',
+        platform: 'web',
+        type: 'unknown',
+        connected: true,
+        state: viewerConfig.url
+      };
+    }
+  });
   const agent = new AgentSessionService(agentProvider);
   const cases = new TestCaseService({
     maxUploadSizeBytes: config.maxUploadSizeBytes,
@@ -71,6 +90,7 @@ export function createDefaultServices(options: {
     testRunService: runs
   });
   const tasks = new TaskService({
+    naturalLanguageAppId: config.maestroAppId,
     reports,
     runService: runs,
     storage,

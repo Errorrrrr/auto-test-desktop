@@ -52,25 +52,36 @@ Copy `.env.example` when local overrides are needed:
 ```bash
 MAESTRO_VIEWER_URL=http://127.0.0.1:10000/
 MAESTRO_PROVIDER=mcp
-AGENT_PROVIDER=manual-ready
+MAESTRO_APP_ID=com.example.app
+AGENT_PROVIDER=codex
+AGENT_COMMAND=codex
+AGENT_CODEX_SERVICE_TIER=fast
 RUN_TIMEOUT_MS=300000
 MAX_UPLOAD_SIZE_MB=25
 ```
 
-`MAESTRO_PROVIDER` controls the CLI fallback mode. `AGENT_PROVIDER=manual-ready` keeps Agent control conservative: the app records the user's Agent instruction and requires manual confirmation that the local Agent dialogue is available, but it does not auto-launch or control Codex/Cursor.
+`AGENT_PROVIDER=codex` is the task execution path. The desktop app delegates uploaded YAML and natural-language task runs to `codex exec`; Codex is expected to use its configured Maestro MCP tools to drive the selected Android or iOS device.
 
 ## Local Adapters And Storage
 
-The desktop main process cannot directly call the ChatGPT-hosted Maestro MCP tool. The P0 local adapter therefore uses a configurable CLI fallback:
+Task execution is delegated to Codex instead of invoking `maestro test` directly. This allows Codex to use Maestro MCP for both uploaded YAML and natural-language instructions, including flows that are not valid for direct Maestro CLI execution.
+
+Recommended local configuration:
 
 ```bash
-MAESTRO_PROVIDER=cli
-MAESTRO_CLI_PATH=maestro
+MAESTRO_PROVIDER=mcp
+AGENT_PROVIDER=codex
+AGENT_COMMAND=codex
+AGENT_CODEX_SERVICE_TIER=fast
 ```
+
+`MAESTRO_PROVIDER=mcp` reports Maestro execution as delegated to Codex and does not require a local Maestro CLI for task runs. `MAESTRO_PROVIDER=cli` remains available for compatibility, but task runs still go through Codex. Runtime health checks do not run `maestro --version`.
 
 Device discovery combines `adb devices -l` and `xcrun simctl list devices --json`. Android/iOS entries with `connected=false` are still shown, but run start remains blocked until a connected Android or iOS device is available.
 
-Agent integration is intentionally conservative. `AGENT_PROVIDER=manual-ready` marks the Agent side ready only as an explicit manual-confirmation mode; `AGENT_PROVIDER=manual` keeps run start blocked. If `AGENT_COMMAND` is configured with another provider name, the app checks command availability and reports the mode as degraded because no automated message transport is opened.
+Agent integration currently supports Codex CLI for non-interactive task execution. `AGENT_PROVIDER=codex` checks that `AGENT_COMMAND` is installed and then runs `codex exec` with the selected device, optional App ID, uploaded YAML path, and/or natural-language instruction. `AGENT_CODEX_SERVICE_TIER` defaults to `fast` so older Codex configs with `service_tier = "default"` do not block test execution; set it to `flex` when needed. `AGENT_PROVIDER=manual` and `manual-ready` keep run start blocked because they cannot execute tests.
+
+Natural-language-only task runs are passed directly to Codex. `MAESTRO_APP_ID`, a task Target App ID, or an appId in the prompt is optional launch context for Codex/Maestro MCP rather than a local pre-generation requirement.
 
 Imported test cases and generated artifacts are stored under Electron appData by default:
 

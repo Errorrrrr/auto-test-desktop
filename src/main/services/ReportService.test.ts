@@ -4,14 +4,20 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { AgentProvider } from '../adapters/agent/AgentProvider';
+import type { AgentProvider, AgentTestExecutionRequest } from '../adapters/agent/AgentProvider';
 import type {
   MaestroProvider,
   MaestroRunFlowRequest,
   MaestroRunFlowResult
 } from '../adapters/maestro/MaestroProvider';
 import { AppDataStorage } from '../storage/AppDataStorage';
-import type { DeviceInfo, DeviceStartResult, ServiceHealth, TestCaseManifest } from '../../shared/types';
+import type {
+  DeviceInfo,
+  DeviceStartResult,
+  DeviceStopResult,
+  ServiceHealth,
+  TestCaseManifest
+} from '../../shared/types';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { ReportService } from './ReportService';
@@ -63,6 +69,13 @@ const testAgentProvider: AgentProvider = {
       content: 'Ready.',
       createdAt: '2026-06-16T02:00:00Z'
     };
+  },
+  async runTest(_request: AgentTestExecutionRequest) {
+    return {
+      status: 'succeeded' as const,
+      stdout: 'codex flow passed',
+      stderr: ''
+    };
   }
 };
 
@@ -81,6 +94,15 @@ class SucceedingMaestroProvider implements MaestroProvider {
       device: connectedDevice,
       status: 'already_running',
       detail: `${connectedDevice.name} is already connected.`
+    };
+  }
+
+  async stopDevice(): Promise<DeviceStopResult> {
+    return {
+      deviceId: connectedDevice.id,
+      device: connectedDevice,
+      status: 'not_stoppable',
+      detail: `${connectedDevice.name} cannot be stopped by this test provider.`
     };
   }
 

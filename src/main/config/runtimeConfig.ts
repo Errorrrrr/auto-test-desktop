@@ -1,14 +1,20 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export type MaestroProviderMode = 'cli' | 'mcp' | 'disabled';
 
 export interface RuntimeEnv {
   ADB_PATH?: string;
+  AGENT_CODEX_SERVICE_TIER?: string;
   APP_AUTO_TEST_DATA_DIR?: string;
   AGENT_COMMAND?: string;
   AGENT_PROVIDER?: string;
+  ANDROID_HOME?: string;
   ANDROID_EMULATOR_PATH?: string;
+  ANDROID_SDK_ROOT?: string;
   MAESTRO_CLI_PATH?: string;
+  MAESTRO_APP_ID?: string;
   MAESTRO_PROVIDER?: string;
   MAESTRO_VIEWER_URL?: string;
   MAX_UPLOAD_SIZE_MB?: string;
@@ -18,10 +24,12 @@ export interface RuntimeEnv {
 
 export interface RuntimeConfig {
   adbPath: string;
+  agentCodexServiceTier: 'fast' | 'flex';
   agentCommand?: string;
   agentProvider: string;
   androidEmulatorPath: string;
   dataRoot: string;
+  maestroAppId?: string;
   maestroCliPath: string;
   maestroProvider: MaestroProviderMode;
   maxUploadSizeBytes: number;
@@ -50,6 +58,32 @@ function parseMaestroProvider(value: string | undefined): MaestroProviderMode {
   return 'cli';
 }
 
+function parseCodexServiceTier(value: string | undefined): 'fast' | 'flex' {
+  return value?.trim() === 'flex' ? 'flex' : 'fast';
+}
+
+function resolveAndroidSdkToolPath(
+  env: RuntimeEnv,
+  relativePath: string[],
+  fallback: string
+): string {
+  const sdkRoots = [
+    env.ANDROID_HOME?.trim(),
+    env.ANDROID_SDK_ROOT?.trim(),
+    join(homedir(), 'Library', 'Android', 'sdk')
+  ].filter((value): value is string => Boolean(value));
+
+  for (const sdkRoot of sdkRoots) {
+    const candidate = join(sdkRoot, ...relativePath);
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return fallback;
+}
+
 export function createRuntimeConfig(
   env: RuntimeEnv,
   defaults: {
@@ -60,11 +94,14 @@ export function createRuntimeConfig(
   const maxUploadSizeMb = parsePositiveInteger(env.MAX_UPLOAD_SIZE_MB, DEFAULT_MAX_UPLOAD_SIZE_MB);
 
   return {
-    adbPath: env.ADB_PATH?.trim() || 'adb',
-    agentCommand: env.AGENT_COMMAND?.trim() || undefined,
-    agentProvider: env.AGENT_PROVIDER?.trim() || 'manual-ready',
-    androidEmulatorPath: env.ANDROID_EMULATOR_PATH?.trim() || 'emulator',
+    adbPath: env.ADB_PATH?.trim() || resolveAndroidSdkToolPath(env, ['platform-tools', 'adb'], 'adb'),
+    agentCodexServiceTier: parseCodexServiceTier(env.AGENT_CODEX_SERVICE_TIER),
+    agentProvider: env.AGENT_PROVIDER?.trim() || 'codex',
+    agentCommand: env.AGENT_COMMAND?.trim() || ((env.AGENT_PROVIDER?.trim() || 'codex') === 'codex' ? 'codex' : undefined),
+    androidEmulatorPath:
+      env.ANDROID_EMULATOR_PATH?.trim() || resolveAndroidSdkToolPath(env, ['emulator', 'emulator'], 'emulator'),
     dataRoot,
+    maestroAppId: env.MAESTRO_APP_ID?.trim() || undefined,
     maestroCliPath: env.MAESTRO_CLI_PATH?.trim() || 'maestro',
     maestroProvider: parseMaestroProvider(env.MAESTRO_PROVIDER),
     maxUploadSizeBytes: maxUploadSizeMb * 1024 * 1024,

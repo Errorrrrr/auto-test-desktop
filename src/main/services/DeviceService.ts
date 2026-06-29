@@ -1,4 +1,9 @@
-import type { DeviceInfo, DeviceStartResult, ServiceHealth } from '../../shared/types';
+import type {
+  DeviceInfo,
+  DeviceStartResult,
+  DeviceStopResult,
+  ServiceHealth
+} from '../../shared/types';
 import type {
   MaestroProvider,
   MaestroRunFlowRequest,
@@ -8,13 +13,16 @@ import { requireStringField } from './validation';
 
 type DeviceServiceOptions = {
   provider: MaestroProvider;
+  webDeviceProvider?: () => DeviceInfo | undefined;
 };
 
 export class DeviceService {
   private readonly provider: MaestroProvider;
+  private readonly webDeviceProvider?: () => DeviceInfo | undefined;
 
   constructor(options: DeviceServiceOptions) {
     this.provider = options.provider;
+    this.webDeviceProvider = options.webDeviceProvider;
   }
 
   async getHealth(): Promise<ServiceHealth> {
@@ -22,11 +30,21 @@ export class DeviceService {
   }
 
   async listDevices(): Promise<DeviceInfo[]> {
+    let devices: DeviceInfo[];
+
     try {
-      return await this.provider.listDevices();
+      devices = await this.provider.listDevices();
     } catch {
-      return [];
+      devices = [];
     }
+
+    const webDevice = this.webDeviceProvider?.();
+
+    if (!webDevice) {
+      return devices;
+    }
+
+    return [...devices.filter((device) => device.id !== webDevice.id), webDevice];
   }
 
   async hasConnectedExecutableDevice(deviceId?: string): Promise<boolean> {
@@ -44,6 +62,12 @@ export class DeviceService {
     const deviceId = requireStringField(payload, 'deviceId');
 
     return this.provider.startDevice({ deviceId });
+  }
+
+  async stopDevice(payload: unknown): Promise<DeviceStopResult> {
+    const deviceId = requireStringField(payload, 'deviceId');
+
+    return this.provider.stopDevice({ deviceId });
   }
 
   async runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {

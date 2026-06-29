@@ -16,7 +16,7 @@ function createWindow(): void {
     height: 860,
     minWidth: 1040,
     minHeight: 720,
-    title: 'App Auto Test',
+    title: 'Auto Test Desktop',
     show: false,
     backgroundColor: '#f6f8fb',
     webPreferences: {

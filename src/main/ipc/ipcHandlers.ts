@@ -12,6 +12,7 @@ export function createIpcHandlers(services: AppAutoTestServices): IpcHandlers {
     [IPC_CHANNELS.env.getStatus]: () => services.env.getStatus(),
     [IPC_CHANNELS.devices.list]: () => services.devices.listDevices(),
     [IPC_CHANNELS.devices.start]: (payload: unknown) => services.devices.startDevice(payload),
+    [IPC_CHANNELS.devices.stop]: (payload: unknown) => services.devices.stopDevice(payload),
     [IPC_CHANNELS.viewer.getConfig]: () => services.viewer.getConfig(),
     [IPC_CHANNELS.viewer.probe]: (payload: unknown) => services.viewer.probe(payload),
     [IPC_CHANNELS.cases.import]: (payload: unknown) => services.cases.importCase(payload),

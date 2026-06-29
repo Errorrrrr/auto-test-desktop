@@ -83,8 +83,10 @@ const STATUS_LABELS: Record<Language, Record<string, string>> = {
     ready: '就绪',
     rejected: '已拒绝',
     running: '运行中',
+    already_stopped: '已关闭',
     success: '成功',
     succeeded: '成功',
+    stopped: '已关闭',
     test_case: '测试用例',
     timeout: '超时',
     unchecked: '未检查',
@@ -118,11 +120,17 @@ const EXACT_ZH: Record<string, string> = {
   'Importing through the preload case API.': '正在通过 preload 用例 API 导入。',
   'Local agent adapter is reserved for the next implementation task.':
     '本地 Agent 适配器预留给下一阶段实现。',
-  'Local agent command detection is available, but P0 does not auto-launch Codex/Cursor or open a message transport.':
-    '已支持本地 Agent 命令检测，但 P0 不会自动启动 Codex/Cursor，也不会打开消息传输。',
-  'Local agent command is not configured. The desktop client will not auto-launch Codex or Cursor.':
-    '尚未配置本地 Agent 命令，桌面客户端不会自动启动 Codex 或 Cursor。',
-  'Local agent confirmation is not available.': '本地 Agent 确认不可用。',
+  'Codex CLI test executor is not available.': 'Codex CLI 测试执行器不可用。',
+  'Codex CLI is not configured. Configure AGENT_PROVIDER=codex and AGENT_COMMAND=codex.':
+    '尚未配置 Codex CLI。请配置 AGENT_PROVIDER=codex 和 AGENT_COMMAND=codex。',
+  'Codex CLI is not configured for task execution.': 'Codex CLI 尚未配置为任务执行器。',
+  'Codex CLI test executor is not available in the browser fallback.':
+    '浏览器 fallback 中不可用 Codex CLI 测试执行器。',
+  'Codex task execution was cancelled.': 'Codex 任务执行已取消。',
+  'Codex CLI and Maestro MCP execution require the Electron main process.':
+    'Codex CLI 与 Maestro MCP 执行需要 Electron 主进程。',
+  'Manual-ready Agent mode cannot execute task tests. Configure AGENT_PROVIDER=codex so Codex CLI can call Maestro MCP.':
+    'manual-ready Agent 模式不能执行测试任务。请配置 AGENT_PROVIDER=codex，让 Codex CLI 调用 Maestro MCP。',
   'Local device discovery has not been checked yet.': '尚未检查本地设备。',
   'Local target accepted by the renderer fallback.': 'renderer fallback 已接受本地地址。',
   'Local viewer reachability has not been checked in this session.': '本次会话尚未检查本地 Viewer 可达性。',
@@ -133,7 +141,14 @@ const EXACT_ZH: Record<string, string> = {
   'Maestro provider is disabled by configuration.': 'Maestro provider 已被配置禁用。',
   'Maestro provider is not available.': 'Maestro provider 不可用。',
   'Maestro provider is not wired in this baseline.': '当前基线尚未接入 Maestro provider。',
+  'Maestro MCP execution requires the Electron main process and Codex CLI.':
+    'Maestro MCP 执行需要 Electron 主进程和 Codex CLI。',
   'Markdown report exported.': 'Markdown 报告已导出。',
+  'Natural-language flow generated.': '自然语言用例已生成。',
+  'Run finished.': '运行已结束。',
+  'Run started.': '运行已开始。',
+  'Task input updated.': '任务输入已更新。',
+  'Test case imported.': '测试用例已导入。',
   'No connected Android or iOS device is available.': '没有可用的已连接 Android 或 iOS 设备。',
   'No connected Android or iOS device is available for this run.':
     '本次运行没有可用的已连接 Android 或 iOS 设备。',
@@ -199,18 +214,32 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
   const dynamicRules: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
     [/^Agent command "(.+)" is installed, but no message transport is configured\. Auto-launch is disabled\.$/, (match) => `Agent 命令 "${match[1]}" 已安装，但尚未配置消息传输，已禁用自动启动。`],
     [/^Agent command "(.+)" is unavailable: (.+)$/, (match) => `Agent 命令 "${match[1]}" 不可用：${match[2]}`],
+    [/^Codex CLI command "(.+)" is installed\. Task execution will be delegated to Codex, which should call Maestro MCP\.$/, (match) => `Codex CLI 命令 "${match[1]}" 已安装。测试执行会委托给 Codex，并由 Codex 调用 Maestro MCP。`],
+    [/^Codex CLI command "(.+)" is unavailable: (.+)$/, (match) => `Codex CLI 命令 "${match[1]}" 不可用：${match[2]}`],
     [/^Cancelling (.+)\.$/, (match) => `正在取消 ${match[1]}。`],
     [/^Direct MCP calls are not available inside the desktop client; CLI fallback is available \((.+)\)\.$/, (match) => `桌面客户端内不可直接调用 MCP；CLI fallback 可用（${match[1]}）。`],
+    [/^Direct MCP calls are not available inside the desktop client; CLI fallback command is configured \((.+)\)\.$/, (match) => `桌面客户端内不可直接调用 MCP；CLI fallback 命令已配置（${match[1]}）。`],
     [/^File is larger than (.+) MB\.$/, (match) => `文件超过 ${match[1]} MB。`],
     [/^Found (\d+) supported device\(s\): (\d+) connected, (\d+) virtual, (\d+) physical\.$/, (match) => `发现 ${match[1]} 台受支持设备：${match[2]} 台已连接，${match[3]} 台虚拟设备，${match[4]} 台真机。`],
     [/^Last refreshed (.+)\.$/, (match) => `上次刷新：${match[1]}。`],
     [/^Maestro CLI is available \((.+)\)\.$/, (match) => `Maestro CLI 可用（${match[1]}）。`],
+    [/^Maestro CLI command is configured \((.+)\)\. Version check is skipped until execution\.$/, (match) => `Maestro CLI 命令已配置（${match[1]}）。版本检查已延后到执行时。`],
+    [/^Maestro MCP execution is delegated to Codex CLI\. Local Maestro CLI is not used for task execution\.$/, () => 'Maestro MCP 执行已委托给 Codex CLI。本地 Maestro CLI 不用于任务执行。'],
     [/^Maestro MCP\/CLI is unavailable: (.+)$/, (match) => `Maestro MCP/CLI 不可用：${match[1]}`],
     [/^Markdown exported to (.+)\.$/, (match) => `Markdown 已导出到 ${match[1]}。`],
     [/^Ready for (.+)\.$/, (match) => `已准备好在 ${match[1]} 上运行。`],
     [/^Starting (.+)\.$/, (match) => `正在开启 ${match[1]}。`],
+    [/^Stopping (.+)\.$/, (match) => `正在关闭 ${match[1]}。`],
+    [/^Stopped Android virtual device "(.+)"\.$/, (match) => `已关闭 Android 虚拟设备“${match[1]}”。`],
+    [/^Stopped iOS simulator "(.+)"\.$/, (match) => `已关闭 iOS 模拟器“${match[1]}”。`],
+    [/^Failed to stop Android virtual device "(.+)": (.+)$/, (match) => `关闭 Android 虚拟设备“${match[1]}”失败：${match[2]}`],
+    [/^Failed to stop iOS simulator "(.+)": (.+)$/, (match) => `关闭 iOS 模拟器“${match[1]}”失败：${match[2]}`],
     [/^(.+) cannot be started from the desktop client\.$/, (match) => `${match[1]} 不能从桌面客户端开启。`],
+    [/^(.+) cannot be stopped from the desktop client\.$/, (match) => `${match[1]} 不能从桌面客户端关闭。`],
+    [/^(.+) is already disconnected\.$/, (match) => `${match[1]} 已断开连接。`],
+    [/^(.+) is already shut down\.$/, (match) => `${match[1]} 已关闭。`],
     [/^Device (.+) start returned (.+)\.$/, (match) => `设备 ${match[1]} 开启返回：${localizeStatus(match[2], language)}。`],
+    [/^Device (.+) stop returned (.+)\.$/, (match) => `设备 ${match[1]} 关闭返回：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) did not reach (.+)\.$/, (match) => `运行 ${match[1]} 未达到 ${match[2]}。`],
     [/^Run (.+) finished as (.+)\.$/, (match) => `运行 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
     [/^Run (.+) is (.+)\.$/, (match) => `运行 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
@@ -270,10 +299,10 @@ export const COPY = {
     },
     shell: {
       navigationLabel: '工作区导航',
-      brand: 'App Auto Test',
-      subtitle: 'P0 工作台',
-      eyebrow: 'QSC-23',
-      title: '自动化测试工作台'
+      brand: 'Auto Test Desktop',
+      subtitle: '应用自动化测试',
+      title: '应用自动化测试',
+      description: '管理测试任务、设备和本地运行环境'
     },
     nav: {
       overview: '仪表盘',
@@ -294,7 +323,9 @@ export const COPY = {
       open: '打开',
       probe: '探测',
       refresh: '刷新',
+      retest: '重新测试',
       startDevice: '开启',
+      stopDevice: '关闭',
       startRun: '开始运行'
     },
     titles: {
@@ -311,6 +342,7 @@ export const COPY = {
       taskDetailWorkspace: '详情工作区',
       taskInput: '上传用例或自然语言',
       taskList: '任务列表',
+      taskLogs: '任务日志',
       testFlow: '测试流程',
       testCase: '测试用例',
       viewer: 'Viewer',
@@ -335,6 +367,8 @@ export const COPY = {
       noReportDetail: '本地运行时接受运行后会生成报告。',
       noSelectedTaskTitle: '未选择任务',
       noSelectedTaskDetail: '从左侧任务列表选择一个任务，或先创建新的测试任务。',
+      noTaskLogsTitle: '暂无任务日志',
+      noTaskLogsDetail: '创建、输入、测试和报告导出记录会显示在这里。',
       noTasksTitle: '暂无测试任务',
       noTasksDetail: '创建第一个任务后，它会出现在任务列表中。',
       waitingRunTitle: '等待运行',
@@ -357,16 +391,18 @@ export const COPY = {
       status: '状态',
       task: '任务',
       target: '目标',
+      targetAppId: '目标 App ID',
       updated: '更新时间'
     },
     copy: {
       createTaskFirst: '任务创建后，才能继续选择设备、配置输入并执行测试。',
       defaultCaseLabel: '选择 Maestro YAML',
-      inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者同时存在时会作为混合输入执行。',
+      inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者都会交给 Codex 通过 Maestro MCP 执行。',
       deleteTaskConfirm: (name: string) => `确认删除测试任务“${name}”？该操作会移除任务工作区数据。`,
       naturalLanguageLabel: '自然语言',
       promptPlaceholder: '在所选设备上运行已上传的冒烟 flow',
-      promptOnlyLimit: '仅自然语言路径会进入 Agent 执行器；当前未配置时会生成阻断报告。',
+      promptOnlyLimit: '自然语言会直接交给 Codex 执行；目标 App ID 可选，但填写后会作为启动上下文传入。',
+      targetAppIdPlaceholder: '例如 com.example.app',
       requirementHint: '需求端口：9999。当前 Maestro 提示：10000。',
       taskDescriptionPlaceholder: '例如：验证登录主流程、覆盖关键失败态',
       taskNamePlaceholder: '例如：登录冒烟测试',
@@ -383,6 +419,7 @@ export const COPY = {
       probeViewer: '探测 Viewer',
       refreshRuntime: '刷新运行时',
       startVirtualDevice: '开启虚拟设备',
+      stopVirtualDevice: '关闭虚拟设备',
       viewerUrlMustBeLocal: 'Viewer URL 必须是本地地址'
     },
     runtime: {
@@ -434,10 +471,10 @@ export const COPY = {
     },
     shell: {
       navigationLabel: 'Workspace navigation',
-      brand: 'App Auto Test',
-      subtitle: 'P0 workbench',
-      eyebrow: 'QSC-23',
-      title: 'Automation Workbench'
+      brand: 'Auto Test Desktop',
+      subtitle: 'App automation',
+      title: 'App Automation',
+      description: 'Manage test tasks, devices, and the local runtime'
     },
     nav: {
       overview: 'Dashboard',
@@ -458,7 +495,9 @@ export const COPY = {
       open: 'Open',
       probe: 'Probe',
       refresh: 'Refresh',
+      retest: 'Retest',
       startDevice: 'Start',
+      stopDevice: 'Stop',
       startRun: 'Start Run'
     },
     titles: {
@@ -475,6 +514,7 @@ export const COPY = {
       taskDetailWorkspace: 'Detail Workspace',
       taskInput: 'Upload Case or Natural Language',
       taskList: 'Task List',
+      taskLogs: 'Task Logs',
       testFlow: 'Test Flow',
       testCase: 'Test Case',
       viewer: 'Viewer',
@@ -499,6 +539,8 @@ export const COPY = {
       noReportDetail: 'A report appears after the local runtime accepts a run.',
       noSelectedTaskTitle: 'No task selected',
       noSelectedTaskDetail: 'Select a task from the task list or create a new test task first.',
+      noTaskLogsTitle: 'No task logs yet',
+      noTaskLogsDetail: 'Creation, input, test, and report export records appear here.',
       noTasksTitle: 'No test tasks',
       noTasksDetail: 'Created tasks appear in this list.',
       waitingRunTitle: 'Waiting for a run',
@@ -521,16 +563,18 @@ export const COPY = {
       status: 'Status',
       task: 'Task',
       target: 'Target',
+      targetAppId: 'Target App ID',
       updated: 'Updated'
     },
     copy: {
       createTaskFirst: 'Create the task before selecting a device, configuring input, and executing the test.',
       defaultCaseLabel: 'Select Maestro YAML',
-      inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. If both exist, the task runs as mixed input.',
+      inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. Both are delegated to Codex through Maestro MCP.',
       deleteTaskConfirm: (name: string) => `Delete test task "${name}"? This removes its task workspace data.`,
       naturalLanguageLabel: 'Natural language',
       promptPlaceholder: 'Run the uploaded smoke flow on the selected device',
-      promptOnlyLimit: 'Prompt-only execution enters the Agent executor path; when it is not configured, the task returns a blocked report.',
+      promptOnlyLimit: 'Prompt-only execution is delegated directly to Codex. Target App ID is optional and passed as launch context when present.',
+      targetAppIdPlaceholder: 'Example: com.example.app',
       requirementHint: 'Requirement: 9999. Current Maestro hint: 10000.',
       taskDescriptionPlaceholder: 'Example: validate the login happy path and key failure states',
       taskNamePlaceholder: 'Example: Login smoke test',
@@ -547,6 +591,7 @@ export const COPY = {
       probeViewer: 'Probe viewer',
       refreshRuntime: 'Refresh runtime',
       startVirtualDevice: 'Start virtual device',
+      stopVirtualDevice: 'Stop virtual device',
       viewerUrlMustBeLocal: 'Viewer URL must be local'
     },
     runtime: {

@@ -1,5 +1,9 @@
 import type { AgentMessage, AgentSession, ServiceHealth } from '../../shared/types';
-import type { AgentProvider } from '../adapters/agent/AgentProvider';
+import type {
+  AgentProvider,
+  AgentTestExecutionRequest,
+  AgentTestExecutionResult
+} from '../adapters/agent/AgentProvider';
 import { requireStringField } from './validation';
 
 export class AgentSessionService {
@@ -25,5 +29,9 @@ export class AgentSessionService {
       sessionId,
       content
     });
+  }
+
+  async runTest(request: AgentTestExecutionRequest): Promise<AgentTestExecutionResult> {
+    return this.provider.runTest(request);
   }
 }

@@ -5,6 +5,8 @@ import type {
   DeviceInfo,
   TaskInput,
   TaskInputMode,
+  TaskLogEntry,
+  TaskLogEntryKind,
   TaskReport,
   TestCaseManifest,
   TestRun,
@@ -13,12 +15,13 @@ import type {
 } from '../../shared/types';
 import type { AppDataStorage } from '../storage/AppDataStorage';
 import { AppError } from './AppError';
-import { optionalStringField, requireStringField } from './validation';
+import { optionalStringField, requireRecord, requireStringField } from './validation';
 import type { ReportService } from './ReportService';
 import type { TestCaseService } from './TestCaseService';
 import type { TestRunService } from './TestRunService';
 
 type TaskServiceOptions = {
+  naturalLanguageAppId?: string;
   reports?: ReportService;
   runService?: TestRunService;
   storage: AppDataStorage;
@@ -26,8 +29,7 @@ type TaskServiceOptions = {
 };
 
 const EMPTY_INPUT_BLOCKER = 'Task input is required before execution.';
-const AGENT_EXECUTOR_NOT_CONFIGURED =
-  'AGENT_EXECUTOR_NOT_CONFIGURED: Natural-language task execution requires an Agent task executor. Configure one before starting prompt-only tasks.';
+const MAX_TASK_LOGS = 100;
 const TASK_TERMINAL_STATUSES = new Set<TestTaskStatus>([
   'blocked',
   'cancelled',
@@ -76,13 +78,16 @@ function getTaskStatus(input: TaskInput): TestTaskStatus {
   return input.mode === 'empty' ? 'draft' : 'ready';
 }
 
-function toTaskCaseInput(manifest: TestCaseManifest): NonNullable<TaskInput['testCase']> {
+function toTaskCaseInput(
+  manifest: TestCaseManifest,
+  source: NonNullable<TaskInput['testCase']>['source'] = 'uploaded'
+): NonNullable<TaskInput['testCase']> {
   return {
     caseId: manifest.id,
     name: manifest.name,
     storedPath: manifest.storedPath ?? manifest.sourcePath,
     format: manifest.format,
-    source: 'uploaded',
+    source,
     importedAt: manifest.importedAt
   };
 }
@@ -119,13 +124,85 @@ function compareTasksByRecency(left: TestTask, right: TestTask): number {
   return right.id.localeCompare(left.id);
 }
 
+function createTaskLogEntry(
+  kind: TaskLogEntryKind,
+  message: string,
+  options: Partial<Omit<TaskLogEntry, 'id' | 'kind' | 'message'>> = {}
+): TaskLogEntry {
+  return {
+    id: `task-log-${randomUUID()}`,
+    kind,
+    message,
+    createdAt: new Date().toISOString(),
+    ...options
+  };
+}
+
+function appendTaskLog(
+  task: TestTask,
+  kind: TaskLogEntryKind,
+  message: string,
+  options: Partial<Omit<TaskLogEntry, 'id' | 'kind' | 'message'>> = {}
+): TestTask {
+  return {
+    ...task,
+    logs: [...(task.logs ?? []), createTaskLogEntry(kind, message, options)].slice(-MAX_TASK_LOGS)
+  };
+}
+
+function hasTaskLog(task: TestTask, kind: TaskLogEntryKind, runId?: string): boolean {
+  return Boolean(
+    task.logs?.some((entry) => entry.kind === kind && (!runId || entry.runId === runId))
+  );
+}
+
+function appendUniqueRunLog(
+  task: TestTask,
+  kind: TaskLogEntryKind,
+  runId: string,
+  message: string,
+  options: Partial<Omit<TaskLogEntry, 'id' | 'kind' | 'message' | 'runId'>> = {}
+): TestTask {
+  if (hasTaskLog(task, kind, runId)) {
+    return task;
+  }
+
+  return appendTaskLog(task, kind, message, {
+    ...options,
+    runId
+  });
+}
+
+function addUniqueValue(values: string[] | undefined, value: string | undefined): string[] {
+  if (!value) {
+    return values ?? [];
+  }
+
+  return Array.from(new Set([...(values ?? []), value]));
+}
+
+function clearCurrentRunFields(task: TestTask): TestTask {
+  const {
+    completedAt: _completedAt,
+    failureReason: _failureReason,
+    latestRunId: _latestRunId,
+    reportPath: _reportPath,
+    startedAt: _startedAt,
+    ...taskWithoutCurrentRun
+  } = task;
+
+  return taskWithoutCurrentRun;
+}
+
 export class TaskService {
+  private readonly naturalLanguageAppId?: string;
   private readonly reports?: ReportService;
   private readonly runService?: TestRunService;
   private readonly storage: AppDataStorage;
   private readonly testCaseService?: TestCaseService;
 
   constructor(options: TaskServiceOptions) {
+    this.naturalLanguageAppId = options.naturalLanguageAppId;
     this.reports = options.reports;
     this.runService = options.runService;
     this.storage = options.storage;
@@ -145,6 +222,15 @@ export class TaskService {
       ...(description ? { description } : {}),
       status: getTaskStatus(input),
       input,
+      ...(this.naturalLanguageAppId ? { targetAppId: this.naturalLanguageAppId } : {}),
+      logs: [
+        createTaskLogEntry('task_created', `Task ${id} created.`, {
+          createdAt: now,
+          status: getTaskStatus(input)
+        })
+      ],
+      reportPaths: [],
+      runIds: [],
       workspacePath: workspace.rootDir,
       createdAt: now,
       updatedAt: now
@@ -189,7 +275,11 @@ export class TaskService {
   async updateInput(request: unknown): Promise<TestTask> {
     const taskId = requireStringField(request, 'taskId');
     const prompt = optionalStringField(request, 'prompt');
+    const record = requireRecord(request, 'Request');
+    const hasTargetAppId = Object.prototype.hasOwnProperty.call(record, 'targetAppId');
     const task = await this.getTask(taskId);
+    const targetAppId = hasTargetAppId ? optionalStringField(request, 'targetAppId') : task.targetAppId;
+    const shouldDropGeneratedCase = !prompt && task.input.testCase?.source === 'agent_generated';
     const input = buildInput({
       naturalLanguage: prompt
         ? {
@@ -197,14 +287,26 @@ export class TaskService {
             updatedAt: new Date().toISOString()
           }
         : undefined,
-      testCase: task.input.testCase
+      testCase: shouldDropGeneratedCase ? undefined : task.input.testCase
     });
-    const nextTask: TestTask = {
-      ...task,
+    const taskWithTargetAppId = {
+      ...clearCurrentRunFields(task)
+    };
+
+    if (targetAppId) {
+      taskWithTargetAppId.targetAppId = targetAppId;
+    } else {
+      delete taskWithTargetAppId.targetAppId;
+    }
+
+    const nextTask = appendTaskLog({
+      ...taskWithTargetAppId,
       input,
       status: getTaskStatus(input),
       updatedAt: new Date().toISOString()
-    };
+    }, 'input_updated', 'Task input updated.', {
+      status: getTaskStatus(input)
+    });
 
     await this.persistTask(nextTask);
 
@@ -222,12 +324,14 @@ export class TaskService {
       naturalLanguage: task.input.naturalLanguage,
       testCase: toTaskCaseInput(manifest)
     });
-    const nextTask: TestTask = {
-      ...task,
+    const nextTask = appendTaskLog({
+      ...clearCurrentRunFields(task),
       input,
       status: getTaskStatus(input),
       updatedAt: new Date().toISOString()
-    };
+    }, 'case_imported', 'Test case imported.', {
+      status: getTaskStatus(input)
+    });
 
     await this.persistTask(nextTask);
 
@@ -237,56 +341,60 @@ export class TaskService {
   async start(request: unknown): Promise<TestTask> {
     const taskId = requireStringField(request, 'taskId');
     const deviceId = requireStringField(request, 'deviceId');
-    const task = await this.syncTaskWithLatestRun(await this.getTask(taskId));
+    const targetAppId = optionalStringField(request, 'targetAppId');
+    const storedTask = await this.syncTaskWithLatestRun(await this.getTask(taskId));
+    const task = targetAppId ? { ...storedTask, targetAppId } : storedTask;
 
-    if (task.latestRunId || task.status === 'queued' || task.status === 'running') {
-      throw new AppError('TASK_ALREADY_STARTED', `Task ${task.id} has already been started.`);
-    }
-
-    if (TASK_TERMINAL_STATUSES.has(task.status)) {
-      throw new AppError('TASK_ALREADY_STARTED', `Task ${task.id} is already ${task.status}.`);
+    if (task.status === 'queued' || task.status === 'running') {
+      throw new AppError('TASK_ALREADY_STARTED', `Task ${task.id} is ${task.status}.`);
     }
 
     if (task.input.mode === 'empty') {
       throw new AppError('TASK_INPUT_REQUIRED', EMPTY_INPUT_BLOCKER);
     }
 
-    if (!task.input.testCase) {
-      const now = new Date().toISOString();
-      const blockedTask: TestTask = {
-        ...task,
-        deviceId,
-        failureReason: AGENT_EXECUTOR_NOT_CONFIGURED,
-        status: 'blocked',
-        startedAt: task.startedAt ?? now,
-        completedAt: now,
-        updatedAt: now
-      };
+    const taskForRun = task;
+    const testCase = task.input.testCase;
+    const prompt = task.input.naturalLanguage?.prompt;
 
-      await this.persistTask(blockedTask);
-
-      return blockedTask;
+    if (!testCase && !prompt?.trim()) {
+      throw new AppError('TASK_INPUT_REQUIRED', EMPTY_INPUT_BLOCKER);
     }
 
     const runService = this.requireRunService();
     const run = await runService.startForTask({
-      taskId: task.id,
-      caseId: task.input.testCase.caseId,
-      caseName: task.input.testCase.name,
+      taskId: taskForRun.id,
+      ...(testCase
+        ? {
+            caseId: testCase.caseId,
+            caseName: testCase.name,
+            flowPath: testCase.storedPath
+          }
+        : {}),
       deviceId,
-      flowPath: task.input.testCase.storedPath,
-      prompt: task.input.naturalLanguage?.prompt
+      prompt,
+      targetAppId: taskForRun.targetAppId ?? this.naturalLanguageAppId
     });
-    const { completedAt: _completedAt, failureReason: _failureReason, ...taskWithoutTerminal } = task;
-    const nextTask: TestTask = {
+    const {
+      completedAt: _completedAt,
+      failureReason: _failureReason,
+      reportPath: _reportPath,
+      ...taskWithoutTerminal
+    } = taskForRun;
+    const nextTask = appendTaskLog({
       ...taskWithoutTerminal,
       deviceId,
       deviceSnapshot: getDeviceSnapshot(run),
       latestRunId: run.id,
+      runIds: addUniqueValue(taskForRun.runIds, run.id),
       startedAt: run.startedAt ?? run.createdAt,
       status: RUN_TO_TASK_STATUS[run.status],
       updatedAt: new Date().toISOString()
-    };
+    }, 'run_started', 'Run started.', {
+      createdAt: run.createdAt,
+      runId: run.id,
+      status: RUN_TO_TASK_STATUS[run.status]
+    });
 
     await this.persistTask(nextTask);
 
@@ -328,12 +436,19 @@ export class TaskService {
 
     const report = await this.requireReportService().exportTaskMarkdown(task, run);
 
-    if (report.filePath && task.reportPath !== report.filePath) {
-      await this.persistTask({
+    if (report.filePath) {
+      const nextTask = appendTaskLog({
         ...task,
         reportPath: report.filePath,
+        reportPaths: addUniqueValue(task.reportPaths, report.filePath),
         updatedAt: new Date().toISOString()
+      }, 'report_generated', 'Markdown report exported.', {
+        reportPath: report.filePath,
+        runId: report.runId,
+        status: report.status
       });
+
+      await this.persistTask(nextTask);
     }
 
     return report;
@@ -401,21 +516,29 @@ export class TaskService {
     const nextCompletedAt = TASK_TERMINAL_STATUSES.has(nextStatus)
       ? run.completedAt ?? run.updatedAt
       : task.completedAt;
-    const nextTask: TestTask = {
+    let nextTask: TestTask = {
       ...task,
       deviceSnapshot: task.deviceSnapshot ?? getDeviceSnapshot(run),
+      runIds: addUniqueValue(task.runIds, run.id),
       status: nextStatus,
       updatedAt: run.updatedAt,
       ...(nextCompletedAt ? { completedAt: nextCompletedAt } : {}),
       ...(run.failureReason ? { failureReason: run.failureReason } : {})
     };
 
-    if (
-      nextTask.status === task.status &&
-      nextTask.updatedAt === task.updatedAt &&
-      nextTask.completedAt === task.completedAt &&
-      nextTask.failureReason === task.failureReason
-    ) {
+    nextTask = appendUniqueRunLog(nextTask, 'run_started', run.id, 'Run started.', {
+      createdAt: run.startedAt ?? run.createdAt,
+      status: nextStatus
+    });
+
+    if (TASK_TERMINAL_STATUSES.has(nextStatus)) {
+      nextTask = appendUniqueRunLog(nextTask, 'run_completed', run.id, 'Run finished.', {
+        createdAt: nextCompletedAt ?? run.updatedAt,
+        status: nextStatus
+      });
+    }
+
+    if (JSON.stringify(nextTask) === JSON.stringify(task)) {
       return task;
     }
 

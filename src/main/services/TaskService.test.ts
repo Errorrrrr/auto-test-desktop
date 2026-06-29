@@ -4,14 +4,24 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { AgentProvider } from '../adapters/agent/AgentProvider';
+import type {
+  AgentProvider,
+  AgentTestExecutionRequest,
+  AgentTestExecutionResult
+} from '../adapters/agent/AgentProvider';
 import type {
   MaestroProvider,
   MaestroRunFlowRequest,
   MaestroRunFlowResult
 } from '../adapters/maestro/MaestroProvider';
 import { AppDataStorage } from '../storage/AppDataStorage';
-import type { DeviceInfo, DeviceStartResult, ServiceHealth, TestRunStatus } from '../../shared/types';
+import type {
+  DeviceInfo,
+  DeviceStartResult,
+  DeviceStopResult,
+  ServiceHealth,
+  TestRunStatus
+} from '../../shared/types';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { ReportService } from './ReportService';
@@ -35,31 +45,41 @@ const readyHealth: ServiceHealth = {
   detail: 'Ready for task execution.'
 };
 
-const disabledAgentProvider: AgentProvider = {
-  async health() {
-    return {
-      status: 'not_configured',
-      label: 'Agent executor',
-      detail: 'Agent executor is not configured.'
-    };
-  },
+class TaskAgentProvider implements AgentProvider {
+  readonly runTestRequests: AgentTestExecutionRequest[] = [];
+
+  async health(): Promise<ServiceHealth> {
+    return readyHealth;
+  }
+
   async createSession() {
     return {
-      id: 'session-disabled',
+      id: 'session-test',
       createdAt: '2026-06-24T04:00:00Z',
-      status: 'unavailable'
+      status: 'available' as const
     };
-  },
-  async sendMessage(request) {
+  }
+
+  async sendMessage(request: { sessionId: string }) {
     return {
-      id: 'message-disabled',
+      id: 'message-test',
       sessionId: request.sessionId,
-      role: 'assistant',
-      content: 'Agent executor is not configured.',
+      role: 'assistant' as const,
+      content: 'Codex task executor is ready.',
       createdAt: '2026-06-24T04:00:00Z'
     };
   }
-};
+
+  async runTest(request: AgentTestExecutionRequest): Promise<AgentTestExecutionResult> {
+    this.runTestRequests.push(request);
+
+    return {
+      status: 'succeeded',
+      stdout: 'codex task passed',
+      stderr: ''
+    };
+  }
+}
 
 class TaskMaestroProvider implements MaestroProvider {
   readonly runFlowRequests: MaestroRunFlowRequest[] = [];
@@ -86,13 +106,23 @@ class TaskMaestroProvider implements MaestroProvider {
     };
   }
 
+  async stopDevice(): Promise<DeviceStopResult> {
+    return {
+      deviceId: connectedDevice.id,
+      device: connectedDevice,
+      status: 'not_stoppable',
+      detail: `${connectedDevice.name} cannot be stopped by this test provider.`
+    };
+  }
+
   async runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {
     this.runFlowRequests.push(request);
     return this.runResult;
   }
 }
 
-async function createTaskServices(): Promise<{
+async function createTaskServices(options: { naturalLanguageAppId?: string } = {}): Promise<{
+  agentProvider: TaskAgentProvider;
   provider: TaskMaestroProvider;
   rootDir: string;
   storage: AppDataStorage;
@@ -101,7 +131,8 @@ async function createTaskServices(): Promise<{
   const rootDir = await mkdtemp(join(tmpdir(), 'app-auto-test-task-'));
   const storage = new AppDataStorage(join(rootDir, 'data'));
   const provider = new TaskMaestroProvider();
-  const agent = new AgentSessionService(disabledAgentProvider);
+  const agentProvider = new TaskAgentProvider();
+  const agent = new AgentSessionService(agentProvider);
   const devices = new DeviceService({ provider });
   const cases = new TestCaseService({
     maxUploadSizeBytes: 1024 * 1024,
@@ -122,10 +153,13 @@ async function createTaskServices(): Promise<{
   tempRoots.push(rootDir);
 
   return {
+    agentProvider,
     provider,
     rootDir,
     storage,
     tasks: new TaskService({
+      naturalLanguageAppId:
+        'naturalLanguageAppId' in options ? options.naturalLanguageAppId : 'com.example.app',
       reports,
       runService: runs,
       storage,
@@ -256,8 +290,8 @@ describe('TaskService', () => {
     );
   });
 
-  it('runs upload-only tasks without requiring an Agent executor', async () => {
-    const { provider, rootDir, tasks } = await createTaskServices();
+  it('runs upload-only tasks through the Codex task executor', async () => {
+    const { agentProvider, rootDir, tasks } = await createTaskServices();
     const sourcePath = join(rootDir, 'smoke.yaml');
     const task = await tasks.create({ name: 'Upload only' });
 
@@ -274,9 +308,11 @@ describe('TaskService', () => {
       latestRunId: expect.stringMatching(/^run-/),
       deviceId: connectedDevice.id
     });
-    expect(provider.runFlowRequests[0]).toMatchObject({
-      deviceId: connectedDevice.id,
-      flowPath: readyTask.input.testCase?.storedPath,
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      casePath: readyTask.input.testCase?.storedPath,
+      device: expect.objectContaining({
+        id: connectedDevice.id
+      }),
       timeoutMs: 1_500
     });
     expect(completedTask).toMatchObject({
@@ -285,26 +321,139 @@ describe('TaskService', () => {
     });
   });
 
-  it('blocks natural-language-only execution until an Agent task executor is configured', async () => {
-    const { tasks } = await createTaskServices();
+  it('allows completed tasks to be retested and records each run in task logs', async () => {
+    const { agentProvider, rootDir, tasks } = await createTaskServices();
+    const sourcePath = join(rootDir, 'smoke.yaml');
+    const task = await tasks.create({ name: 'Retest task' });
+
+    await writeFile(sourcePath, 'appId: com.example.app\n- launchApp\n', 'utf8');
+    const readyTask = await tasks.importCase({ taskId: task.id, sourcePath });
+    const firstQueuedTask = await tasks.start({
+      taskId: readyTask.id,
+      deviceId: connectedDevice.id
+    });
+    const firstCompletedTask = await waitForTaskStatus(tasks, task.id, ['succeeded']);
+    const secondQueuedTask = await tasks.start({
+      taskId: firstCompletedTask.id,
+      deviceId: connectedDevice.id
+    });
+    const secondCompletedTask = await waitForTaskStatus(tasks, task.id, ['succeeded']);
+
+    expect(secondQueuedTask.latestRunId).not.toBe(firstQueuedTask.latestRunId);
+    expect(secondCompletedTask.runIds).toEqual([
+      firstQueuedTask.latestRunId,
+      secondQueuedTask.latestRunId
+    ]);
+    expect(agentProvider.runTestRequests).toHaveLength(2);
+    expect(agentProvider.runTestRequests[0]?.casePath).toBe(readyTask.input.testCase?.storedPath);
+    expect(agentProvider.runTestRequests[1]?.casePath).toBe(readyTask.input.testCase?.storedPath);
+    expect(secondCompletedTask.logs?.filter((entry) => entry.kind === 'run_started')).toHaveLength(2);
+    expect(secondCompletedTask.logs?.filter((entry) => entry.kind === 'run_completed')).toHaveLength(2);
+    expect(secondCompletedTask.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'run_completed',
+          runId: secondQueuedTask.latestRunId,
+          status: 'succeeded'
+        })
+      ])
+    );
+  });
+
+  it('runs natural-language-only execution through Codex without generating local YAML', async () => {
+    const { agentProvider, tasks } = await createTaskServices();
     const task = await tasks.create({ name: 'Prompt task' });
     const readyTask = await tasks.updateInput({
       taskId: task.id,
-      prompt: 'Generate a login smoke flow'
+      prompt: '点击 登录，输入 alice，看到 首页'
     });
 
     expect(readyTask.input.mode).toBe('natural_language');
 
-    const blockedTask = await tasks.start({
+    const queuedTask = await tasks.start({
+      taskId: task.id,
+      deviceId: connectedDevice.id
+    });
+    const completedTask = await waitForTaskStatus(tasks, task.id, ['succeeded']);
+
+    expect(queuedTask).toMatchObject({
+      status: 'queued',
+      input: {
+        mode: 'natural_language'
+      },
+      latestRunId: expect.stringMatching(/^run-/)
+    });
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      casePath: undefined,
+      prompt: '点击 登录，输入 alice，看到 首页',
+      targetAppId: 'com.example.app'
+    });
+    expect(completedTask).toMatchObject({
+      status: 'succeeded',
+      input: {
+        mode: 'natural_language'
+      }
+    });
+  });
+
+  it('allows natural-language-only execution without a target app id', async () => {
+    const { agentProvider, tasks } = await createTaskServices({ naturalLanguageAppId: undefined });
+    const task = await tasks.create({ name: 'Prompt without app id' });
+    await tasks.updateInput({
+      taskId: task.id,
+      prompt: '点击 登录'
+    });
+
+    const queuedTask = await tasks.start({
       taskId: task.id,
       deviceId: connectedDevice.id
     });
 
-    expect(blockedTask).toMatchObject({
-      status: 'blocked',
-      failureReason: expect.stringContaining('AGENT_EXECUTOR_NOT_CONFIGURED')
+    expect(queuedTask.status).toBe('queued');
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      prompt: '点击 登录',
+      targetAppId: undefined
     });
-    expect(blockedTask.latestRunId).toBeUndefined();
+  });
+
+  it('uses the task target app id for natural-language-only execution', async () => {
+    const { agentProvider, tasks } = await createTaskServices({ naturalLanguageAppId: undefined });
+    const task = await tasks.create({ name: 'Prompt with task app id' });
+    await tasks.updateInput({
+      taskId: task.id,
+      prompt: '点击 登录',
+      targetAppId: 'com.example.task'
+    });
+
+    await tasks.start({
+      taskId: task.id,
+      deviceId: connectedDevice.id
+    });
+
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      prompt: '点击 登录',
+      targetAppId: 'com.example.task'
+    });
+  });
+
+  it('uses the start request target app id when the task record has not caught up yet', async () => {
+    const { agentProvider, tasks } = await createTaskServices({ naturalLanguageAppId: undefined });
+    const task = await tasks.create({ name: 'Prompt with start app id' });
+    await tasks.updateInput({
+      taskId: task.id,
+      prompt: '点击 登录'
+    });
+
+    await tasks.start({
+      taskId: task.id,
+      deviceId: connectedDevice.id,
+      targetAppId: 'com.example.start'
+    });
+
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      prompt: '点击 登录',
+      targetAppId: 'com.example.start'
+    });
   });
 
   it('exports task reports into the task reports workspace', async () => {
@@ -338,5 +487,31 @@ describe('TaskService', () => {
     expect(markdown).toContain(`- Run: ${completedTask.latestRunId}`);
     expect(markdown).toContain('- Input mode: test_case');
     expect(markdown).toContain('- Conclusion: Succeeded');
+
+    const taskWithReportLog = await tasks.get({ taskId: task.id });
+
+    expect(taskWithReportLog.reportPath).toBe(report.filePath);
+    expect(taskWithReportLog.reportPaths).toContain(report.filePath);
+    expect(taskWithReportLog.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'report_generated',
+          reportPath: report.filePath,
+          runId: completedTask.latestRunId,
+          status: 'succeeded'
+        })
+      ])
+    );
+
+    const updatedInputTask = await tasks.updateInput({
+      taskId: task.id,
+      prompt: 'Run this report task again'
+    });
+
+    expect(updatedInputTask.status).toBe('ready');
+    expect(updatedInputTask.latestRunId).toBeUndefined();
+    expect(updatedInputTask.reportPath).toBeUndefined();
+    expect(updatedInputTask.runIds).toEqual(expect.arrayContaining([completedTask.latestRunId]));
+    expect(updatedInputTask.reportPaths).toEqual(expect.arrayContaining([report.filePath]));
   });
 });

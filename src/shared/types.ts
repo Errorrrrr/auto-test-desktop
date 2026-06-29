@@ -35,6 +35,10 @@ export interface DeviceStartRequest {
   deviceId: string;
 }
 
+export interface DeviceStopRequest {
+  deviceId: string;
+}
+
 export type DeviceStartStatus =
   | 'already_running'
   | 'failed'
@@ -46,6 +50,19 @@ export interface DeviceStartResult {
   deviceId: string;
   device?: DeviceInfo;
   status: DeviceStartStatus;
+  detail: string;
+}
+
+export type DeviceStopStatus =
+  | 'already_stopped'
+  | 'failed'
+  | 'not_stoppable'
+  | 'stopped';
+
+export interface DeviceStopResult {
+  deviceId: string;
+  device?: DeviceInfo;
+  status: DeviceStopStatus;
   detail: string;
 }
 
@@ -154,16 +171,38 @@ export type TestTaskStatus =
   | 'timeout'
   | 'blocked';
 
+export type TaskLogEntryKind =
+  | 'task_created'
+  | 'input_updated'
+  | 'case_imported'
+  | 'run_started'
+  | 'run_completed'
+  | 'report_generated';
+
+export interface TaskLogEntry {
+  id: string;
+  kind: TaskLogEntryKind;
+  message: string;
+  createdAt: string;
+  runId?: string;
+  reportPath?: string;
+  status?: TestTaskStatus;
+}
+
 export interface TestTask {
   id: string;
   name: string;
   description?: string;
   status: TestTaskStatus;
   input: TaskInput;
+  targetAppId?: string;
   deviceId?: string;
   deviceSnapshot?: DeviceInfo;
   latestRunId?: string;
   reportPath?: string;
+  reportPaths?: string[];
+  runIds?: string[];
+  logs?: TaskLogEntry[];
   workspacePath: string;
   createdAt: string;
   updatedAt: string;
@@ -183,12 +222,14 @@ export interface TaskIdRequest {
 
 export interface TaskUpdateInputRequest extends TaskIdRequest {
   prompt?: string;
+  targetAppId?: string;
 }
 
 export interface TaskImportCaseRequest extends TaskIdRequest, TestCaseImportRequest {}
 
 export interface TaskStartRequest extends TaskIdRequest {
   deviceId: string;
+  targetAppId?: string;
 }
 
 export interface TaskReportExportRequest extends TaskIdRequest {
@@ -316,6 +357,7 @@ export interface AppAutoTestApi {
   devices: {
     list: () => Promise<DeviceInfo[]>;
     start: (deviceId: string) => Promise<DeviceStartResult>;
+    stop: (deviceId: string) => Promise<DeviceStopResult>;
   };
   viewer: {
     getConfig: () => Promise<ViewerConfig>;

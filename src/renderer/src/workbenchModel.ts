@@ -1,6 +1,7 @@
 import type {
   DeviceInfo,
   DeviceStartResult,
+  DeviceStopResult,
   EnvironmentStatus,
   ReportFormat,
   ServiceStatus,
@@ -105,6 +106,10 @@ export function isStartableDevice(device: DeviceInfo): boolean {
   return isVirtualDevice(device) && !device.connected && device.launchable === true;
 }
 
+export function isStoppableDevice(device: DeviceInfo): boolean {
+  return isVirtualDevice(device) && device.connected;
+}
+
 export function mapDeviceStartResultToAction(
   result: DeviceStartResult,
   fallbackDeviceName: string
@@ -114,7 +119,7 @@ export function mapDeviceStartResultToAction(
     failed: 'error',
     not_startable: 'error',
     started: 'success',
-    starting: 'busy'
+    starting: 'success'
   };
 
   return {
@@ -122,6 +127,44 @@ export function mapDeviceStartResultToAction(
     detail: result.detail || `Device ${fallbackDeviceName} start returned ${result.status}.`,
     deviceId: result.deviceId
   };
+}
+
+export function mapDeviceStopResultToAction(
+  result: DeviceStopResult,
+  fallbackDeviceName: string
+): DeviceStartActionState {
+  const statusByResult: Record<DeviceStopResult['status'], AsyncStatus> = {
+    already_stopped: 'success',
+    failed: 'error',
+    not_stoppable: 'error',
+    stopped: 'success'
+  };
+
+  return {
+    status: statusByResult[result.status],
+    detail: result.detail || `Device ${fallbackDeviceName} stop returned ${result.status}.`,
+    deviceId: result.deviceId
+  };
+}
+
+export function hasStartedDeviceAppeared(
+  devices: DeviceInfo[],
+  startedDevice: DeviceInfo,
+  previouslyConnectedDeviceIds: ReadonlySet<string>
+): boolean {
+  return devices.some((device) => {
+    const sameVirtualDevice =
+      device.id === startedDevice.id ||
+      device.name === startedDevice.name ||
+      !previouslyConnectedDeviceIds.has(device.id);
+
+    return (
+      device.connected &&
+      device.platform === startedDevice.platform &&
+      device.type === startedDevice.type &&
+      sameVirtualDevice
+    );
+  });
 }
 
 export function getExecutableDevices(devices: DeviceInfo[]): DeviceInfo[] {
@@ -258,6 +301,7 @@ export function getRunReadiness(input: {
   selectedDeviceId: string;
   task: TestTask | null;
   prompt: string;
+  targetAppId?: string;
 }): RunReadiness {
   const selectedDevice = getSelectedDevice(input.devices, input.selectedDeviceId);
   const inputMode = getTaskInputMode(input.task, input.prompt);
@@ -281,21 +325,18 @@ export function getRunReadiness(input: {
     reasons.push(input.environment.maestro.detail || 'Maestro provider is not available.');
   }
 
+  if (input.environment && !isUsableServiceStatus(input.environment.agent.status)) {
+    reasons.push(input.environment.agent.detail || 'Codex CLI test executor is not available.');
+  }
+
   if (inputMode === 'empty') {
     reasons.push(...(input.task?.input.blockers.length ? input.task.input.blockers : [
       'Task input is required before execution.'
     ]));
   }
 
-  if (input.task?.latestRunId || input.task?.status === 'queued' || input.task?.status === 'running') {
-    reasons.push(`Task ${input.task.id} has already been started.`);
-  }
-
-  if (
-    input.task &&
-    ['blocked', 'cancelled', 'failed', 'succeeded', 'timeout'].includes(input.task.status)
-  ) {
-    reasons.push(`Task ${input.task.id} is already ${input.task.status}.`);
+  if (input.task?.status === 'queued' || input.task?.status === 'running') {
+    reasons.push(`Task ${input.task.id} is ${input.task.status}.`);
   }
 
   const uniqueReasons = uniqueMessages(reasons);

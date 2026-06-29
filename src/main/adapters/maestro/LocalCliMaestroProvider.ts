@@ -1,7 +1,13 @@
+import { constants } from 'node:fs';
+import { access } from 'node:fs/promises';
+import { delimiter, isAbsolute, join } from 'node:path';
+
 import type {
   DeviceInfo,
   DeviceStartRequest,
   DeviceStartResult,
+  DeviceStopRequest,
+  DeviceStopResult,
   ServiceHealth
 } from '../../../shared/types';
 import type { MaestroProviderMode } from '../../config/runtimeConfig';
@@ -32,10 +38,39 @@ interface LocalCliMaestroProviderOptions {
   xcrunCommand?: string;
 }
 
-function summarizeVersion(stdout: string, stderr: string): string {
-  const value = stdout.trim() || stderr.trim();
+function hasPathSeparator(command: string): boolean {
+  return command.includes('/') || command.includes('\\');
+}
 
-  return value.split(/\r?\n/)[0] || 'version command completed';
+async function isExecutablePath(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveExecutablePath(command: string, envPath = process.env.PATH ?? ''): Promise<string | undefined> {
+  if (isAbsolute(command) || hasPathSeparator(command)) {
+    return (await isExecutablePath(command)) ? command : undefined;
+  }
+
+  const pathEntries = [
+    ...envPath.split(delimiter),
+    '/usr/local/bin',
+    '/opt/homebrew/bin'
+  ].filter(Boolean);
+
+  for (const pathEntry of Array.from(new Set(pathEntries))) {
+    const candidate = join(pathEntry, command);
+
+    if (await isExecutablePath(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 function dedupeDevices(devices: DeviceInfo[]): DeviceInfo[] {
@@ -48,6 +83,36 @@ function dedupeDevices(devices: DeviceInfo[]): DeviceInfo[] {
   return Array.from(byId.values());
 }
 
+function isAndroidAvdDevice(device: DeviceInfo): boolean {
+  return (
+    device.platform === 'android' &&
+    device.type === 'emulator' &&
+    device.source === 'android-avd'
+  );
+}
+
+function isAndroidAdbEmulator(device: DeviceInfo): boolean {
+  return device.platform === 'android' && device.type === 'emulator' && device.source === 'adb';
+}
+
+function mergeAndroidAvdRuntimeDevice(
+  avdDevice: DeviceInfo,
+  runtimeDevice: DeviceInfo
+): DeviceInfo {
+  return {
+    ...runtimeDevice,
+    name: avdDevice.name,
+    connected: runtimeDevice.connected,
+    launchable: false,
+    source: runtimeDevice.source,
+    state: runtimeDevice.state
+  };
+}
+
+type PendingAndroidAvdStart = {
+  knownAdbDeviceIds: Set<string>;
+};
+
 export class LocalCliMaestroProvider implements MaestroProvider {
   private readonly adbCommand: string;
   private readonly emulatorCommand: string;
@@ -56,6 +121,8 @@ export class LocalCliMaestroProvider implements MaestroProvider {
   private readonly providerMode: MaestroProviderMode;
   private readonly spawnFile: SpawnFile;
   private readonly xcrunCommand: string;
+  private readonly androidAvdRuntimeDeviceIds = new Map<string, string>();
+  private readonly pendingAndroidAvdStarts = new Map<string, PendingAndroidAvdStart>();
 
   constructor(options: LocalCliMaestroProviderOptions = {}) {
     this.adbCommand = options.adbCommand ?? 'adb';
@@ -76,19 +143,26 @@ export class LocalCliMaestroProvider implements MaestroProvider {
       };
     }
 
+    if (this.providerMode === 'mcp') {
+      return {
+        status: 'ready',
+        label: 'Maestro provider',
+        detail:
+          'Maestro MCP execution is delegated to Codex CLI. Local Maestro CLI is not used for task execution.'
+      };
+    }
+
     try {
-      const { stdout, stderr } = await this.execFile(this.maestroCommand, ['--version'], {
-        timeout: 5_000
-      });
-      const detail =
-        this.providerMode === 'mcp'
-          ? `Direct MCP calls are not available inside the desktop client; CLI fallback is available (${summarizeVersion(stdout, stderr)}).`
-          : `Maestro CLI is available (${summarizeVersion(stdout, stderr)}).`;
+      const resolvedCommand = await resolveExecutablePath(this.maestroCommand);
+
+      if (!resolvedCommand) {
+        throw new Error(`Command "${this.maestroCommand}" was not found or is not executable.`);
+      }
 
       return {
-        status: this.providerMode === 'mcp' ? 'degraded' : 'ready',
+        status: 'ready',
         label: 'Maestro provider',
-        detail
+        detail: `Maestro CLI command is configured (${resolvedCommand}). Version check is skipped until execution.`
       };
     } catch (error) {
       return {
@@ -131,7 +205,7 @@ export class LocalCliMaestroProvider implements MaestroProvider {
       devices.push(...parseXctraceIosPhysicalDevices(iosPhysicalResult.value.stdout));
     }
 
-    return dedupeDevices(devices);
+    return this.mergeAndroidAvdRuntimeDevices(dedupeDevices(devices));
   }
 
   async startDevice(request: DeviceStartRequest): Promise<DeviceStartResult> {
@@ -156,7 +230,7 @@ export class LocalCliMaestroProvider implements MaestroProvider {
     }
 
     if (device.platform === 'android' && device.type === 'emulator') {
-      return this.startAndroidVirtualDevice(device);
+      return this.startAndroidVirtualDevice(device, devices);
     }
 
     if (device.platform === 'ios' && device.type === 'simulator') {
@@ -174,7 +248,134 @@ export class LocalCliMaestroProvider implements MaestroProvider {
     };
   }
 
-  private async startAndroidVirtualDevice(device: DeviceInfo): Promise<DeviceStartResult> {
+  async stopDevice(request: DeviceStopRequest): Promise<DeviceStopResult> {
+    const devices = await this.listDevices();
+    const device = devices.find((candidate) => candidate.id === request.deviceId);
+
+    if (!device) {
+      return {
+        deviceId: request.deviceId,
+        status: 'failed',
+        detail: `Device "${request.deviceId}" was not found. Refresh devices and try again.`
+      };
+    }
+
+    if (!device.connected) {
+      return {
+        deviceId: device.id,
+        device,
+        status: 'already_stopped',
+        detail: `${device.name} is already disconnected.`
+      };
+    }
+
+    if (device.platform === 'android' && device.type === 'emulator') {
+      return this.stopAndroidVirtualDevice(device);
+    }
+
+    if (device.platform === 'ios' && device.type === 'simulator') {
+      return this.stopIosSimulator(device);
+    }
+
+    return {
+      deviceId: device.id,
+      device,
+      status: 'not_stoppable',
+      detail:
+        device.platform === 'ios' || device.platform === 'android'
+          ? `${device.name} is a physical device and cannot be stopped by the desktop client.`
+          : `${device.name} is not an Android or iOS virtual device.`
+    };
+  }
+
+  private mergeAndroidAvdRuntimeDevices(devices: DeviceInfo[]): DeviceInfo[] {
+    const adbEmulators = devices.filter(isAndroidAdbEmulator);
+    const usedRuntimeDeviceIds = new Set<string>();
+    const mergedAvdDevices = new Map<string, DeviceInfo>();
+
+    for (const device of devices) {
+      if (!isAndroidAvdDevice(device)) {
+        continue;
+      }
+
+      const mappedRuntimeId = this.androidAvdRuntimeDeviceIds.get(device.id);
+      let runtimeDevice = mappedRuntimeId
+        ? adbEmulators.find((candidate) => candidate.id === mappedRuntimeId)
+        : undefined;
+
+      if (!runtimeDevice) {
+        const pendingStart = this.pendingAndroidAvdStarts.get(device.id);
+
+        runtimeDevice = pendingStart
+          ? adbEmulators.find(
+              (candidate) =>
+                !pendingStart.knownAdbDeviceIds.has(candidate.id) &&
+                !usedRuntimeDeviceIds.has(candidate.id)
+            )
+          : undefined;
+      }
+
+      if (!runtimeDevice) {
+        this.androidAvdRuntimeDeviceIds.delete(device.id);
+        continue;
+      }
+
+      this.androidAvdRuntimeDeviceIds.set(device.id, runtimeDevice.id);
+      this.pendingAndroidAvdStarts.delete(device.id);
+      usedRuntimeDeviceIds.add(runtimeDevice.id);
+      mergedAvdDevices.set(device.id, mergeAndroidAvdRuntimeDevice(device, runtimeDevice));
+    }
+
+    return devices.flatMap((device) => {
+      const mergedDevice = mergedAvdDevices.get(device.id);
+
+      if (mergedDevice) {
+        return [mergedDevice];
+      }
+
+      return usedRuntimeDeviceIds.has(device.id) ? [] : [device];
+    });
+  }
+
+  private getAndroidAvdIdForRuntimeDevice(runtimeDeviceId: string): string | undefined {
+    for (const [avdDeviceId, mappedRuntimeDeviceId] of this.androidAvdRuntimeDeviceIds) {
+      if (mappedRuntimeDeviceId === runtimeDeviceId) {
+        return avdDeviceId;
+      }
+    }
+
+    return undefined;
+  }
+
+  private toStoppedAndroidDevice(device: DeviceInfo): DeviceInfo {
+    const avdDeviceId = this.getAndroidAvdIdForRuntimeDevice(device.id);
+
+    if (avdDeviceId) {
+      this.androidAvdRuntimeDeviceIds.delete(avdDeviceId);
+      this.pendingAndroidAvdStarts.delete(avdDeviceId);
+
+      return {
+        ...device,
+        id: avdDeviceId,
+        connected: false,
+        launchable: true,
+        source: 'android-avd',
+        state: 'Shutdown'
+      };
+    }
+
+    return {
+      ...device,
+      connected: false,
+      launchable: false,
+      state: 'Shutdown'
+    };
+  }
+
+  private async startAndroidVirtualDevice(
+    device: DeviceInfo,
+    currentDevices: DeviceInfo[]
+  ): Promise<DeviceStartResult> {
     const avdName = parseAndroidAvdDeviceId(device.id);
 
     if (!avdName) {
@@ -188,11 +389,19 @@ export class LocalCliMaestroProvider implements MaestroProvider {
 
     try {
       await this.spawnFile(this.emulatorCommand, ['-avd', avdName]);
+      this.pendingAndroidAvdStarts.set(device.id, {
+        knownAdbDeviceIds: new Set(
+          currentDevices
+            .filter(isAndroidAdbEmulator)
+            .map((currentDevice) => currentDevice.id)
+        )
+      });
 
       return {
         deviceId: device.id,
         device: {
           ...device,
+          launchable: false,
           state: 'Starting'
         },
         status: 'starting',
@@ -204,6 +413,26 @@ export class LocalCliMaestroProvider implements MaestroProvider {
         device,
         status: 'failed',
         detail: `Failed to start Android virtual device "${device.name}": ${describeCommandError(error)}`
+      };
+    }
+  }
+
+  private async stopAndroidVirtualDevice(device: DeviceInfo): Promise<DeviceStopResult> {
+    try {
+      await this.execFile(this.adbCommand, ['-s', device.id, 'emu', 'kill'], { timeout: 10_000 });
+
+      return {
+        deviceId: device.id,
+        device: this.toStoppedAndroidDevice(device),
+        status: 'stopped',
+        detail: `Stopped Android virtual device "${device.name}".`
+      };
+    } catch (error) {
+      return {
+        deviceId: device.id,
+        device,
+        status: 'failed',
+        detail: `Failed to stop Android virtual device "${device.name}": ${describeCommandError(error)}`
       };
     }
   }
@@ -253,6 +482,47 @@ export class LocalCliMaestroProvider implements MaestroProvider {
         device,
         status: 'failed',
         detail: `Failed to start iOS simulator "${device.name}": ${detail}`
+      };
+    }
+  }
+
+  private async stopIosSimulator(device: DeviceInfo): Promise<DeviceStopResult> {
+    try {
+      await this.execFile(this.xcrunCommand, ['simctl', 'shutdown', device.id], { timeout: 15_000 });
+
+      return {
+        deviceId: device.id,
+        device: {
+          ...device,
+          connected: false,
+          launchable: true,
+          state: 'Shutdown'
+        },
+        status: 'stopped',
+        detail: `Stopped iOS simulator "${device.name}".`
+      };
+    } catch (error) {
+      const detail = describeCommandError(error);
+
+      if (/already shutdown|not booted|current state:\s*Shutdown/i.test(detail)) {
+        return {
+          deviceId: device.id,
+          device: {
+            ...device,
+            connected: false,
+            launchable: true,
+            state: 'Shutdown'
+          },
+          status: 'already_stopped',
+          detail: `${device.name} is already shut down.`
+        };
+      }
+
+      return {
+        deviceId: device.id,
+        device,
+        status: 'failed',
+        detail: `Failed to stop iOS simulator "${device.name}": ${detail}`
       };
     }
   }

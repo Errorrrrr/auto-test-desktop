@@ -4,7 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { AgentProvider } from '../adapters/agent/AgentProvider';
+import type {
+  AgentProvider,
+  AgentTestExecutionRequest,
+  AgentTestExecutionResult
+} from '../adapters/agent/AgentProvider';
 import type {
   MaestroProvider,
   MaestroRunFlowRequest,
@@ -14,6 +18,7 @@ import { AppDataStorage } from '../storage/AppDataStorage';
 import type {
   DeviceInfo,
   DeviceStartResult,
+  DeviceStopResult,
   ServiceHealth,
   TestCaseManifest,
   TestRunStatus
@@ -57,28 +62,55 @@ const readyHealth: ServiceHealth = {
   detail: 'Ready for test execution.'
 };
 
-function createAgentProvider(health: ServiceHealth = readyHealth): AgentProvider {
-  return {
-    async health() {
-      return health;
-    },
-    async createSession() {
+type RunTestHandler = (request: AgentTestExecutionRequest) => Promise<AgentTestExecutionResult>;
+
+class MockAgentProvider implements AgentProvider {
+  readonly runTestRequests: AgentTestExecutionRequest[] = [];
+  private readonly healthState: ServiceHealth;
+  private readonly runTestHandler: RunTestHandler;
+
+  constructor(options: {
+    health?: ServiceHealth;
+    runResult?: AgentTestExecutionResult;
+    runTest?: RunTestHandler;
+  } = {}) {
+    this.healthState = options.health ?? readyHealth;
+    this.runTestHandler =
+      options.runTest ??
+      (async () =>
+        options.runResult ?? {
+          status: 'succeeded',
+          stdout: 'codex test passed',
+          stderr: ''
+        });
+  }
+
+  async health(): Promise<ServiceHealth> {
+    return this.healthState;
+  }
+
+  async createSession() {
       return {
         id: 'session-test',
         createdAt: '2026-06-16T02:00:00Z',
-        status: health.status === 'ready' ? 'available' : 'unavailable'
+        status: this.healthState.status === 'ready' ? 'available' as const : 'unavailable' as const
       };
-    },
-    async sendMessage(request) {
+  }
+
+  async sendMessage(request: { sessionId: string }) {
       return {
         id: 'message-test',
         sessionId: request.sessionId,
-        role: 'assistant',
+        role: 'assistant' as const,
         content: 'Ready to run.',
         createdAt: '2026-06-16T02:00:00Z'
       };
-    }
-  };
+  }
+
+  async runTest(request: AgentTestExecutionRequest): Promise<AgentTestExecutionResult> {
+    this.runTestRequests.push(request);
+    return this.runTestHandler(request);
+  }
 }
 
 type RunFlowHandler = (request: MaestroRunFlowRequest) => Promise<MaestroRunFlowResult>;
@@ -126,6 +158,17 @@ class MockMaestroProvider implements MaestroProvider {
     };
   }
 
+  async stopDevice(): Promise<DeviceStopResult> {
+    const device = this.devices[0];
+
+    return {
+      deviceId: device?.id ?? 'unknown',
+      device,
+      status: device?.connected ? 'not_stoppable' : 'already_stopped',
+      detail: device?.connected ? 'Device is not stoppable.' : 'Device is already stopped.'
+    };
+  }
+
   async runFlow(request: MaestroRunFlowRequest): Promise<MaestroRunFlowResult> {
     this.runFlowRequests.push(request);
     return this.runFlowHandler(request);
@@ -151,9 +194,11 @@ async function createRunService(options: {
   agentHealth?: ServiceHealth;
   devices?: DeviceInfo[];
   maestroHealth?: ServiceHealth;
+  runTest?: RunTestHandler;
   runFlow?: RunFlowHandler;
-  runResult?: MaestroRunFlowResult;
+  runResult?: AgentTestExecutionResult;
 } = {}): Promise<{
+  agentProvider: MockAgentProvider;
   provider: MockMaestroProvider;
   runs: TestRunService;
   storage: AppDataStorage;
@@ -163,16 +208,21 @@ async function createRunService(options: {
   const provider = new MockMaestroProvider({
     devices: options.devices,
     health: options.maestroHealth,
-    runFlow: options.runFlow,
-    runResult: options.runResult
+    runFlow: options.runFlow
   });
-  const agentService = new AgentSessionService(createAgentProvider(options.agentHealth));
+  const agentProvider = new MockAgentProvider({
+    health: options.agentHealth,
+    runResult: options.runResult,
+    runTest: options.runTest
+  });
+  const agentService = new AgentSessionService(agentProvider);
   const deviceService = new DeviceService({ provider });
 
   tempRoots.push(rootDir);
   await storage.getTestCaseStore().upsert(importedCase);
 
   return {
+    agentProvider,
     provider,
     runs: new TestRunService({
       agentService,
@@ -214,8 +264,8 @@ afterEach(async () => {
 });
 
 describe('TestRunService', () => {
-  it('runs a mock flow to succeeded and persists execution metadata', async () => {
-    const { provider, runs, storage } = await createRunService();
+  it('runs a Codex-driven task to succeeded and persists execution metadata', async () => {
+    const { agentProvider, runs, storage } = await createRunService();
     const run = await runs.start({
       caseId: importedCase.id,
       deviceId: connectedDevice.id,
@@ -224,18 +274,20 @@ describe('TestRunService', () => {
     const finalRun = await waitForStatus(runs, run.id, ['succeeded']);
 
     expect(run.status).toBe('queued');
-    expect(provider.runFlowRequests).toHaveLength(1);
-    expect(provider.runFlowRequests[0]).toMatchObject({
-      deviceId: connectedDevice.id,
-      flowPath: importedCase.storedPath,
+    expect(agentProvider.runTestRequests).toHaveLength(1);
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      casePath: importedCase.storedPath,
+      device: expect.objectContaining({
+        id: connectedDevice.id
+      }),
       timeoutMs: 1_234
     });
-    expect(provider.runFlowRequests[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(agentProvider.runTestRequests[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(finalRun).toMatchObject({
       caseName: importedCase.name,
       deviceName: connectedDevice.name,
       status: 'succeeded',
-      stdout: 'flow passed'
+      stdout: 'codex test passed'
     });
     await expect(storage.getRunStore().get(run.id)).resolves.toMatchObject({
       id: run.id,
@@ -250,7 +302,7 @@ describe('TestRunService', () => {
         status: 'failed' as const,
         stdout: '',
         stderr: 'assertion failed',
-        failureReason: 'Flow assertion failed.'
+        failureReason: 'Codex assertion failed.'
       }
     },
     {
@@ -259,7 +311,7 @@ describe('TestRunService', () => {
         status: 'timeout' as const,
         stdout: '',
         stderr: '',
-        failureReason: 'Flow timed out.'
+        failureReason: 'Codex timed out.'
       }
     }
   ])('normalizes mock flow $expectedStatus results', async ({ expectedStatus, runResult }) => {
@@ -281,7 +333,7 @@ describe('TestRunService', () => {
     const deferred = createDeferred<MaestroRunFlowResult>();
     let runSignal: AbortSignal | undefined;
     const { runs } = await createRunService({
-      runFlow: async (request) => {
+      runTest: async (request) => {
         runSignal = request.signal;
 
         return deferred.promise;
@@ -316,7 +368,7 @@ describe('TestRunService', () => {
   it('keeps cancelled runs cancelled when the provider rejects immediately on abort', async () => {
     let runSignal: AbortSignal | undefined;
     const { runs } = await createRunService({
-      runFlow: async (request) => {
+      runTest: async (request) => {
         const signal = request.signal;
 
         if (!signal) {

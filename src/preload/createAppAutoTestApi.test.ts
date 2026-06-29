@@ -35,6 +35,7 @@ describe('preload appAutoTest API', () => {
 
     await api.viewer.probe('http://127.0.0.1:10000/');
     await api.devices.start('ios-shutdown');
+    await api.devices.stop('ios-booted');
     await api.cases.import({ sourcePath: '/tmp/smoke.yaml' });
     await api.runs.getStatus('run-1');
     await api.tasks.create({ name: 'Smoke task', description: 'Verify launch' });
@@ -63,6 +64,10 @@ describe('preload appAutoTest API', () => {
       {
         channel: IPC_CHANNELS.devices.start,
         payload: { deviceId: 'ios-shutdown' }
+      },
+      {
+        channel: IPC_CHANNELS.devices.stop,
+        payload: { deviceId: 'ios-booted' }
       },
       {
         channel: IPC_CHANNELS.cases.import,

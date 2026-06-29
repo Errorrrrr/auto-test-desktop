@@ -10,12 +10,12 @@ export function createRuntimeSnapshot(
       agent: {
         status: 'not_configured',
         label: 'Agent adapter',
-        detail: 'Local agent adapter is reserved for the next implementation task.'
+        detail: 'Codex CLI test executor is not available in the browser fallback.'
       },
       maestro: {
         status: 'not_configured',
         label: 'Maestro MCP',
-        detail: 'Maestro provider is not wired in this baseline.'
+        detail: 'Maestro MCP execution requires the Electron main process and Codex CLI.'
       },
       viewer: {
         status: viewerConfig.allowed ? 'degraded' : 'disconnected',
@@ -31,7 +31,7 @@ export function createRuntimeSnapshot(
     canStartRun: false,
     blockers: [
       'No connected Android or iOS device is available in this baseline.',
-      'Maestro and local agent adapters are pending follow-up implementation.'
+      'Codex CLI and Maestro MCP execution require the Electron main process.'
     ],
     capabilities: {
       uploads: ['.yaml', '.yml'],

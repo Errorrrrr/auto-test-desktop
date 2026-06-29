@@ -11,14 +11,27 @@ import {
 
 describe('Maestro local CLI adapter', () => {
   it('reports a clear disconnected health state when Maestro CLI is unavailable', async () => {
-    const execFile: ExecFile = async () => {
-      throw new Error('maestro not found');
-    };
-    const provider = new LocalCliMaestroProvider({ execFile });
+    const provider = new LocalCliMaestroProvider({
+      maestroCommand: '/definitely-missing/maestro'
+    });
 
     await expect(provider.health()).resolves.toMatchObject({
       status: 'disconnected',
-      detail: expect.stringContaining('maestro not found')
+      detail: expect.stringContaining('not found or is not executable')
+    });
+  });
+
+  it('does not execute maestro --version during health checks', async () => {
+    const provider = new LocalCliMaestroProvider({
+      execFile: async () => {
+        throw new Error('health should not execute the Maestro command');
+      },
+      maestroCommand: process.execPath
+    });
+
+    await expect(provider.health()).resolves.toMatchObject({
+      status: 'ready',
+      detail: expect.stringContaining('Version check is skipped until execution')
     });
   });
 
@@ -221,6 +234,7 @@ Ada's iPhone (18.1) (00008110-001C2D)
     ).resolves.toMatchObject({
       status: 'starting',
       device: {
+        launchable: false,
         state: 'Starting'
       }
     });
@@ -230,6 +244,99 @@ Ada's iPhone (18.1) (00008110-001C2D)
         args: ['-avd', 'Pixel_8_API_35']
       }
     ]);
+  });
+
+  it('merges a newly started Android adb emulator into its AVD row', async () => {
+    let adbStdout = 'List of devices attached\n';
+    const execFile: ExecFile = async (file, args) => {
+      if (file === 'adb') {
+        return { stdout: adbStdout, stderr: '' };
+      }
+
+      if (file === 'emulator') {
+        return { stdout: 'Medium_Phone\n', stderr: '' };
+      }
+
+      if (file === 'xcrun' && args[0] === 'simctl') {
+        return { stdout: JSON.stringify({ devices: {} }), stderr: '' };
+      }
+
+      return { stdout: '', stderr: '' };
+    };
+    const provider = new LocalCliMaestroProvider({
+      execFile,
+      spawnFile: async () => {}
+    });
+
+    await expect(
+      provider.startDevice({ deviceId: 'android-avd:Medium_Phone' })
+    ).resolves.toMatchObject({
+      status: 'starting'
+    });
+    adbStdout =
+      'List of devices attached\nemulator-5554 device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu transport_id:1\n';
+
+    await expect(provider.listDevices()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'emulator-5554',
+        name: 'Medium Phone',
+        platform: 'android',
+        type: 'emulator',
+        connected: true,
+        launchable: false,
+        source: 'adb',
+        state: 'device'
+      })
+    ]);
+  });
+
+  it('stops merged Android virtual devices through adb and restores the launchable AVD row', async () => {
+    let adbStdout = 'List of devices attached\n';
+    const calls: Array<{ args: string[]; file: string }> = [];
+    const execFile: ExecFile = async (file, args) => {
+      calls.push({ file, args });
+
+      if (file === 'adb' && args[0] === 'devices') {
+        return { stdout: adbStdout, stderr: '' };
+      }
+
+      if (file === 'adb' && args[0] === '-s') {
+        return { stdout: 'OK\n', stderr: '' };
+      }
+
+      if (file === 'emulator') {
+        return { stdout: 'Medium_Phone\n', stderr: '' };
+      }
+
+      if (file === 'xcrun' && args[0] === 'simctl') {
+        return { stdout: JSON.stringify({ devices: {} }), stderr: '' };
+      }
+
+      return { stdout: '', stderr: '' };
+    };
+    const provider = new LocalCliMaestroProvider({
+      execFile,
+      spawnFile: async () => {}
+    });
+
+    await provider.startDevice({ deviceId: 'android-avd:Medium_Phone' });
+    adbStdout =
+      'List of devices attached\nemulator-5554 device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu transport_id:1\n';
+    await provider.listDevices();
+
+    await expect(provider.stopDevice({ deviceId: 'emulator-5554' })).resolves.toMatchObject({
+      status: 'stopped',
+      device: {
+        id: 'android-avd:Medium_Phone',
+        connected: false,
+        launchable: true,
+        state: 'Shutdown'
+      }
+    });
+    expect(calls).toContainEqual({
+      file: 'adb',
+      args: ['-s', 'emulator-5554', 'emu', 'kill']
+    });
   });
 
   it('boots shutdown iOS simulators through simctl', async () => {
@@ -273,6 +380,47 @@ Ada's iPhone (18.1) (00008110-001C2D)
     expect(calls).toContainEqual({
       file: 'xcrun',
       args: ['simctl', 'bootstatus', 'ios-shutdown', '-b']
+    });
+  });
+
+  it('shuts down booted iOS simulators through simctl', async () => {
+    const calls: Array<{ args: string[]; file: string }> = [];
+    const execFile: ExecFile = async (file, args) => {
+      calls.push({ file, args });
+
+      if (file === 'xcrun' && args[0] === 'simctl' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify({
+            devices: {
+              'com.apple.CoreSimulator.SimRuntime.iOS-18-0': [
+                {
+                  name: 'iPhone 16',
+                  udid: 'ios-booted',
+                  state: 'Booted',
+                  isAvailable: true
+                }
+              ]
+            }
+          }),
+          stderr: ''
+        };
+      }
+
+      return { stdout: '', stderr: '' };
+    };
+    const provider = new LocalCliMaestroProvider({ execFile });
+
+    await expect(provider.stopDevice({ deviceId: 'ios-booted' })).resolves.toMatchObject({
+      status: 'stopped',
+      device: {
+        connected: false,
+        launchable: true,
+        state: 'Shutdown'
+      }
+    });
+    expect(calls).toContainEqual({
+      file: 'xcrun',
+      args: ['simctl', 'shutdown', 'ios-booted']
     });
   });
 

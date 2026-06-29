@@ -107,13 +107,17 @@ function getTaskArtifacts(task: TestTask): TaskReportArtifact[] {
     });
   }
 
-  if (task.reportPath) {
+  const reportPaths = Array.from(
+    new Set([...(task.reportPaths ?? []), ...(task.reportPath ? [task.reportPath] : [])])
+  );
+
+  reportPaths.forEach((reportPath, index) => {
     artifacts.push({
-      label: 'Task report',
-      path: task.reportPath,
+      label: index === reportPaths.length - 1 ? 'Task report' : `Task report ${index + 1}`,
+      path: reportPath,
       kind: 'report'
     });
-  }
+  });
 
   return artifacts;
 }

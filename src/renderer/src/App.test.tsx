@@ -65,7 +65,10 @@ describe('app shell scrolling', () => {
     try {
       const html = renderToStaticMarkup(<App />);
 
-      expect(html).toContain('自动化测试工作台');
+      expect(html).toContain('Auto Test Desktop');
+      expect(html).toContain('应用自动化测试');
+      expect(html).toContain('管理测试任务、设备和本地运行环境');
+      expect(html).not.toContain('QSC-23');
       expect(html).toContain('仪表盘');
       expect(html).toContain('测试任务');
       expect(html).toContain('设备管理');
@@ -89,7 +92,9 @@ describe('app shell scrolling', () => {
     try {
       const html = renderToStaticMarkup(<App />);
 
-      expect(html).toContain('Automation Workbench');
+      expect(html).toContain('Auto Test Desktop');
+      expect(html).toContain('App Automation');
+      expect(html).toContain('Manage test tasks, devices, and the local runtime');
       expect(html).toContain('Refresh');
     } finally {
       vi.unstubAllGlobals();
@@ -225,7 +230,9 @@ describe('workbench panels', () => {
     expect(html).toContain('data-task-detail-section="devices"');
     expect(html).toContain('data-task-detail-section="input"');
     expect(html).toContain('data-task-detail-section="progress"');
+    expect(html).toContain('data-task-detail-section="logs"');
     expect(html).toContain('data-task-detail-section="report"');
+    expect(html).toContain('Target App ID');
     expect(html).toContain('data-task-id="task-login"');
     expect(html).toContain('data-task-id="task-checkout"');
     expect(html).toContain('Checkout regression');
@@ -237,6 +244,148 @@ describe('workbench panels', () => {
     expect(html).not.toContain('data-page-link="report"');
     expect(html).not.toContain('run-login');
     expect(html).not.toContain('Pixel 8');
+  });
+
+  it('renders task logs and a retest action for completed tasks', () => {
+    const selectedTask = createTask({
+      id: 'task-history',
+      name: 'History task',
+      status: 'succeeded',
+      targetAppId: 'com.example.history',
+      latestRunId: 'run-2',
+      runIds: ['run-1', 'run-2'],
+      logs: [
+        {
+          id: 'log-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T03:00:00.000Z',
+          runId: 'run-2',
+          status: 'queued'
+        },
+        {
+          id: 'log-report',
+          kind: 'report_generated',
+          message: 'Markdown report exported.',
+          createdAt: '2026-06-25T03:05:00.000Z',
+          runId: 'run-2',
+          reportPath: '/tmp/task-history/reports/task-history.md',
+          status: 'succeeded'
+        }
+      ]
+    });
+
+    const html = renderToStaticMarkup(
+      <TaskWorkspacePanel
+        currentTask={selectedTask}
+        language="en"
+        onCreateTask={() => undefined}
+        onSelectTask={() => undefined}
+        onTaskDescriptionChange={() => undefined}
+        onTaskNameChange={() => undefined}
+        taskAction={{
+          status: 'success',
+          detail: 'Task task-history is succeeded.'
+        }}
+        taskDescription=""
+        taskName=""
+        targetAppId="com.example.history"
+        tasks={[selectedTask]}
+      />
+    );
+
+    expect(html).toContain('data-task-detail-section="logs"');
+    expect(html).toContain('Task Logs');
+    expect(html).toContain('Retest');
+    expect(html).toContain('value="com.example.history"');
+    expect(html).toContain('Run started.');
+    expect(html).toContain('Markdown report exported.');
+    expect(html).toContain('run-2');
+    expect(html).toContain('/tmp/task-history/reports/task-history.md');
+  });
+
+  it('renders task device selection as a compact dropdown inside task details', () => {
+    const selectedTask = createTask({
+      id: 'task-device-compact',
+      name: 'Device compact layout'
+    });
+    const devices: DeviceInfo[] = [
+      {
+        id: 'ios-1',
+        name: 'iPhone 16',
+        platform: 'ios',
+        type: 'simulator',
+        connected: true
+      },
+      {
+        id: 'android-avd-1',
+        name: 'Pixel 8 API 35',
+        platform: 'android',
+        type: 'emulator',
+        connected: false,
+        launchable: true
+      } as DeviceInfo,
+      {
+        id: 'web-1',
+        name: 'Chrome',
+        platform: 'web',
+        type: 'unknown',
+        connected: true
+      } as DeviceInfo
+    ];
+
+    const html = renderToStaticMarkup(
+      <TaskWorkspacePanel
+        currentTask={selectedTask}
+        deviceAction={{
+          status: 'success',
+          detail: 'Found 2 supported device(s): 1 connected, 2 virtual, 0 physical.'
+        }}
+        devices={devices}
+        language="en"
+        onCheckDevices={() => undefined}
+        onCreateTask={() => undefined}
+        onNavigate={() => undefined}
+        onSelectDevice={() => undefined}
+        onSelectTask={() => undefined}
+        onStartDevice={() => undefined}
+        onTaskDescriptionChange={() => undefined}
+        onTaskNameChange={() => undefined}
+        selectedDeviceId="ios-1"
+        taskAction={{
+          status: 'success',
+          detail: 'Task task-device-compact is ready.'
+        }}
+        taskDescription=""
+        taskName=""
+        tasks={[selectedTask]}
+      />
+    );
+
+    expect(html).toContain('data-task-detail-section="devices"');
+    expect(html).toContain('class="device-panel compact-device-panel"');
+    expect(html).toContain('class="compact-device-control"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('class="device-select-trigger"');
+    expect(html).toContain('class="device-picker-menu" hidden=""');
+    expect(html).toContain('<div class="device-picker-heading">Android</div>');
+    expect(html).toContain('<div class="device-picker-heading">iOS</div>');
+    expect(html).toContain('<div class="device-picker-heading">Web</div>');
+    expect(html).toContain('class="device-picker-option-item selected"');
+    expect(html).toContain('iPhone 16');
+    expect(html).toContain('Chrome');
+    expect(html).toContain('<small>Web</small>');
+    expect(html).not.toContain('<select');
+    expect(html).not.toContain('class="device-list"');
+    expect(html.match(/Found 2 supported device\(s\): 1 connected, 2 virtual, 0 physical/g)).toHaveLength(1);
+  });
+
+  it('positions the compact device picker as an overlay instead of page layout content', () => {
+    expect(rendererStyles).toMatch(/\.compact-device-control\s*{[^}]*position:\s*relative;[^}]*z-index:\s*30;/s);
+    expect(rendererStyles).toMatch(
+      /\.device-picker-menu\s*{[^}]*position:\s*absolute;[^}]*top:\s*calc\(100%\s*\+\s*8px\);[^}]*z-index:\s*40;/s
+    );
+    expect(rendererStyles).toMatch(/\.device-picker-menu\[hidden\]\s*{[^}]*display:\s*none;/s);
   });
 
   it('keeps task state partitioned by selected task id in the renderer source', () => {
@@ -253,8 +402,10 @@ describe('workbench panels', () => {
 
     expect(devicesPage).toContain('onCheckDevices={() => void handleManageCheckDevices()}');
     expect(devicesPage).toContain('onStartDevice={(device) => void handleManageStartDevice(device)}');
+    expect(devicesPage).toContain('onStopDevice={(device) => void handleManageStopDevice(device)}');
     expect(devicesPage).not.toContain('handleCheckDevices()');
     expect(devicesPage).not.toContain('handleStartDevice(device)');
+    expect(devicesPage).not.toContain('handleStopDevice(device)');
   });
 
   it('keeps the latest task dashboard card on latest task data only', () => {
@@ -275,6 +426,12 @@ describe('workbench panels', () => {
     expect(appSource).toContain('api.tasks.getReport');
     expect(appSource).toContain('api.tasks.exportReport');
     expect(appSource).not.toMatch(/api\.(cases|runs|reports)\./);
+  });
+
+  it('keeps task polling long enough for Codex and Maestro MCP runs to reach backend timeout', () => {
+    expect(appSource).toContain('const RUN_STATUS_POLL_TIMEOUT_MS = 10 * 60_000;');
+    expect(appSource).toContain('Date.now() - startedPollingAt < RUN_STATUS_POLL_TIMEOUT_MS');
+    expect(appSource).not.toContain('const RUN_STATUS_MAX_POLLS = 120;');
   });
 
   it('renders disconnected devices as disabled execution targets', () => {
@@ -311,6 +468,16 @@ describe('workbench panels', () => {
       } as DeviceInfo,
       {
         id: 'emulator-5554',
+        name: 'Medium Phone',
+        platform: 'android',
+        type: 'emulator',
+        connected: true,
+        launchable: false,
+        source: 'adb',
+        state: 'device'
+      } as DeviceInfo,
+      {
+        id: 'emulator-5556',
         name: 'Offline adb emulator',
         platform: 'android',
         type: 'emulator',
@@ -335,6 +502,7 @@ describe('workbench panels', () => {
         onSelectDevice={() => undefined}
         onCheckDevices={() => undefined}
         onStartDevice={() => undefined}
+        onStopDevice={() => undefined}
         deviceAction={{
           status: 'idle',
           detail: 'Local device discovery has not been checked yet.'
@@ -345,12 +513,63 @@ describe('workbench panels', () => {
 
     expect(html).toContain('Check devices');
     expect(html).toContain('Pixel 8 API 35');
-    expect(html).toContain('android / emulator');
+    expect(html).toContain('Android / Shutdown');
+    expect(html).toContain('Medium Phone');
+    expect(html).toContain('Android / device');
     expect(html).toContain('Offline adb emulator');
+    expect(html).toContain('Android / offline');
     expect(html).toContain('Start');
+    expect(html).toContain('Stop');
     expect(html).toContain('Jane iPhone');
-    expect(html).toContain('ios / physical');
+    expect(html).toContain('iOS / physical');
     expect(html.match(/>Start</g)).toHaveLength(1);
+    expect(html.match(/>Stop</g)).toHaveLength(1);
+  });
+
+  it('does not duplicate device inspection summary in device management', () => {
+    const devices: DeviceInfo[] = [
+      {
+        id: 'ios-1',
+        name: 'iPhone 16',
+        platform: 'ios',
+        type: 'simulator',
+        connected: true
+      },
+      {
+        id: 'android-avd-1',
+        name: 'Pixel 8 API 35',
+        platform: 'android',
+        type: 'emulator',
+        connected: false,
+        launchable: true
+      } as DeviceInfo,
+      {
+        id: 'web-1',
+        name: 'Chrome',
+        platform: 'web',
+        type: 'unknown',
+        connected: true
+      } as DeviceInfo
+    ];
+
+    const html = renderToStaticMarkup(
+      <DeviceListPanel
+        devices={devices}
+        deviceAction={{
+          status: 'success',
+          detail: 'Found 2 supported device(s): 1 connected, 2 virtual, 0 physical.'
+        }}
+        language="en"
+        selectionMode="manage"
+      />
+    );
+
+    expect(html).toContain('Device Management');
+    expect(html).toContain('<span>Android</span><small>1</small>');
+    expect(html).toContain('<span>iOS</span><small>1</small>');
+    expect(html).toContain('<span>Web</span><small>1</small>');
+    expect(html).toContain('Chrome');
+    expect(html.match(/Found 2 supported device\(s\): 1 connected, 2 virtual, 0 physical/g)).toHaveLength(1);
   });
 
   it('renders a failed task report with redacted report fields only', () => {

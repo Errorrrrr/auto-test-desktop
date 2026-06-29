@@ -17,11 +17,12 @@ type TestRunServiceOptions = {
 
 export interface TaskRunStartRequest {
   taskId: string;
-  caseId: string;
+  caseId?: string;
   caseName?: string;
   deviceId: string;
-  flowPath: string;
+  flowPath?: string;
   prompt?: string;
+  targetAppId?: string;
 }
 
 const TERMINAL_STATUSES = new Set<TestRun['status']>([
@@ -46,6 +47,18 @@ function isExecutableDevice(device: DeviceInfo): boolean {
 
 function getFlowPath(testCase: TestCaseManifest): string {
   return testCase.storedPath ?? testCase.sourcePath;
+}
+
+function getFallbackCaseId(request: TaskRunStartRequest): string {
+  return request.caseId ?? `${request.taskId}:natural-language`;
+}
+
+function getFallbackCaseName(request: TaskRunStartRequest): string {
+  if (request.caseName) {
+    return request.caseName;
+  }
+
+  return request.flowPath ? 'Uploaded test case' : 'Natural language task';
 }
 
 export class TestRunService {
@@ -118,16 +131,23 @@ export class TestRunService {
     };
 
     await this.recordRun(run);
-    void this.executeRun(run.id, getFlowPath(testCase));
+    void this.executeRun(run.id, {
+      flowPath: getFlowPath(testCase)
+    });
 
     return run;
   }
 
   async startForTask(request: TaskRunStartRequest): Promise<TestRun> {
-    const [maestroHealth, devices] = await Promise.all([
+    const [agentHealth, maestroHealth, devices] = await Promise.all([
+      this.agentService.getHealth(),
       this.deviceService.getHealth(),
       this.deviceService.listDevices()
     ]);
+
+    if (!isUsableAgentStatus(agentHealth.status)) {
+      throw new AppError('AGENT_NOT_AVAILABLE', agentHealth.detail);
+    }
 
     if (!isUsableMaestroStatus(maestroHealth.status)) {
       throw new AppError('MAESTRO_NOT_AVAILABLE', maestroHealth.detail);
@@ -142,17 +162,18 @@ export class TestRunService {
       );
     }
 
-    if (!request.flowPath.trim()) {
-      throw new AppError('INVALID_ARGUMENT', 'flowPath is required.');
+    if (!request.flowPath?.trim() && !request.prompt?.trim()) {
+      throw new AppError('INVALID_ARGUMENT', 'A test case file or natural-language prompt is required.');
     }
 
     const now = new Date().toISOString();
     const run: TestRun = {
       id: `run-${randomUUID()}`,
       taskId: request.taskId,
-      caseId: request.caseId,
-      caseName: request.caseName,
-      casePath: request.flowPath,
+      caseId: getFallbackCaseId(request),
+      caseName: getFallbackCaseName(request),
+      ...(request.flowPath ? { casePath: request.flowPath } : {}),
+      agentDetail: agentHealth.detail,
       deviceId: request.deviceId,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -164,7 +185,10 @@ export class TestRunService {
     };
 
     await this.recordRun(run);
-    void this.executeRun(run.id, request.flowPath);
+    void this.executeRun(run.id, {
+      flowPath: request.flowPath,
+      targetAppId: request.targetAppId
+    });
 
     return run;
   }
@@ -228,7 +252,13 @@ export class TestRunService {
     return storedRun;
   }
 
-  private async executeRun(runId: string, flowPath: string): Promise<void> {
+  private async executeRun(
+    runId: string,
+    options: {
+      flowPath?: string;
+      targetAppId?: string;
+    }
+  ): Promise<void> {
     const startedAt = new Date().toISOString();
 
     try {
@@ -249,10 +279,21 @@ export class TestRunService {
 
       this.abortControllers.set(runId, abortController);
 
-      const result = await this.deviceService.runFlow({
-        deviceId: running.deviceId,
-        flowPath,
+      const result = await this.agentService.runTest({
+        caseId: running.caseId,
+        caseName: running.caseName,
+        casePath: options.flowPath,
+        device: {
+          id: running.deviceId,
+          name: running.deviceName ?? running.deviceId,
+          platform: running.devicePlatform ?? 'unknown',
+          type: running.deviceType ?? 'unknown',
+          connected: true
+        },
+        prompt: running.prompt,
         signal: abortController.signal,
+        targetAppId: options.targetAppId,
+        taskId: running.taskId,
         timeoutMs: this.runTimeoutMs
       });
       const current = await this.getRun(runId);

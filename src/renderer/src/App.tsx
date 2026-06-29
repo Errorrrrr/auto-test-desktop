@@ -1,15 +1,20 @@
 import {
   Activity,
+  Apple,
   Ban,
+  Bot,
   Cable,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   FileText,
+  History,
   Loader2,
   MessageSquare,
   MonitorSmartphone,
   Play,
   Power,
+  PowerOff,
   RefreshCw,
   Settings2,
   Smartphone,
@@ -24,6 +29,7 @@ import type {
   AgentSession,
   AppAutoTestApi,
   DeviceInfo,
+  DevicePlatform,
   EnvironmentStatus,
   ServiceHealth,
   TaskReport,
@@ -57,9 +63,12 @@ import {
   getSelectedTaskAfterRefresh,
   getSelectedDevice,
   getStatusTone,
+  hasStartedDeviceAppeared,
   isExecutableDevice,
   isStartableDevice,
+  isStoppableDevice,
   mapDeviceStartResultToAction,
+  mapDeviceStopResultToAction,
   mapViewerProbeResult,
   normalizeViewerInput,
   upsertTaskList,
@@ -79,9 +88,17 @@ type DeviceActionState = RunActionState & {
   deviceId?: string;
 };
 
+type DevicePanelDensity = 'comfortable' | 'compact';
+type DevicePlatformGroup = {
+  platform: DevicePlatform;
+  label: string;
+  devices: DeviceInfo[];
+};
+
 type TaskWorkspaceState = {
   selectedDeviceId: string;
   prompt: string;
+  targetAppId: string;
   uploadState: UploadState;
   runAction: RunActionState;
   reportExport: RunActionState;
@@ -89,12 +106,14 @@ type TaskWorkspaceState = {
   agentMessages: AgentMessage[];
 };
 
+const DEVICE_START_REFRESH_DELAYS_MS = [1200, 2500, 5000];
+
 type MenuPage = 'overview' | 'task' | 'devices' | 'viewer';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 const RUN_STATUS_POLL_INTERVAL_MS = 1_000;
-const RUN_STATUS_MAX_POLLS = 120;
+const RUN_STATUS_POLL_TIMEOUT_MS = 10 * 60_000;
 
 function createIdleRunAction(): RunActionState {
   return {
@@ -114,6 +133,7 @@ function createInitialTaskWorkspaceState(task?: TestTask): TaskWorkspaceState {
   return {
     selectedDeviceId: task?.deviceId ?? '',
     prompt: task?.input.naturalLanguage?.prompt ?? '',
+    targetAppId: task?.targetAppId ?? '',
     uploadState: createInitialUploadState(),
     runAction: createIdleRunAction(),
     reportExport: createIdleReportExportAction(),
@@ -136,6 +156,7 @@ function createBrowserFallbackTask(options: {
   description?: string;
   prompt?: string;
   status?: TestTask['status'];
+  targetAppId?: string;
   failureReason?: string;
 } = {}): TestTask {
   const now = new Date().toISOString();
@@ -145,6 +166,7 @@ function createBrowserFallbackTask(options: {
     id: options.id ?? `browser-task-${Date.now()}`,
     name: options.name ?? 'Browser fallback task',
     ...(options.description ? { description: options.description } : {}),
+    ...(options.targetAppId ? { targetAppId: options.targetAppId } : {}),
     status: options.status ?? (prompt ? 'ready' : 'draft'),
     input: {
       mode: prompt ? 'natural_language' : 'empty',
@@ -184,6 +206,17 @@ function createBrowserFallbackTaskReport(taskId: string, summary: string): TaskR
   };
 }
 
+function createBrowserFallbackWebDevice(): DeviceInfo {
+  return {
+    id: 'web-viewer',
+    name: 'Web Viewer',
+    platform: 'web',
+    type: 'unknown',
+    connected: true,
+    state: getViewerConfig({}).url
+  };
+}
+
 function createBrowserFallbackApi(): AppAutoTestApi {
   const copy = COPY.en;
 
@@ -202,11 +235,16 @@ function createBrowserFallbackApi(): AppAutoTestApi {
       }
     },
     devices: {
-      list: async () => [],
+      list: async () => [createBrowserFallbackWebDevice()],
       start: async (deviceId: string) => ({
         deviceId,
         status: 'failed',
         detail: 'Device launch is only available in the Electron desktop runtime.'
+      }),
+      stop: async (deviceId: string) => ({
+        deviceId,
+        status: 'failed',
+        detail: 'Device shutdown is only available in the Electron desktop runtime.'
       })
     },
     viewer: {
@@ -323,7 +361,8 @@ function createBrowserFallbackApi(): AppAutoTestApi {
       updateInput: async (request) =>
         createBrowserFallbackTask({
           id: request.taskId,
-          prompt: request.prompt
+          prompt: request.prompt,
+          targetAppId: request.targetAppId
         }),
       importCase: async (request) =>
         createBrowserFallbackTask({
@@ -375,6 +414,30 @@ function getApi(): AppAutoTestApi {
   return window.appAutoTest ?? createBrowserFallbackApi();
 }
 
+function replaceDeviceInList(
+  currentDevices: DeviceInfo[],
+  previousDeviceId: string,
+  nextDevice: DeviceInfo
+): DeviceInfo[] {
+  let replaced = false;
+  const nextDevices = currentDevices.map((device) => {
+    if (device.id === previousDeviceId || device.id === nextDevice.id) {
+      replaced = true;
+      return nextDevice;
+    }
+
+    return device;
+  });
+  const mergedDevices = replaced ? nextDevices : [...nextDevices, nextDevice];
+  const byId = new Map<string, DeviceInfo>();
+
+  for (const device of mergedDevices) {
+    byId.set(device.id, device);
+  }
+
+  return Array.from(byId.values());
+}
+
 function StatusPill({ status, language }: { status: string; language: Language }): ReactElement {
   return (
     <span className={`status-pill status-${getStatusTone(status)}`}>
@@ -395,6 +458,67 @@ function EmptyDeviceState({ language }: { language: Language }): ReactElement {
       </div>
     </div>
   );
+}
+
+function isDeviceInspectionActionDetail(detail: string): boolean {
+  return /^Found \d+ supported device\(s\): \d+ connected, \d+ virtual, \d+ physical\.$/.test(detail);
+}
+
+const DEVICE_PLATFORM_ORDER: DevicePlatform[] = ['android', 'ios', 'web', 'unknown'];
+
+function getDevicePlatformLabel(platform: DevicePlatform): string {
+  const labels: Record<DevicePlatform, string> = {
+    android: 'Android',
+    ios: 'iOS',
+    unknown: 'Other',
+    web: 'Web'
+  };
+
+  return labels[platform];
+}
+
+function getDeviceSubtitle(device: DeviceInfo): string {
+  const platformLabel = getDevicePlatformLabel(device.platform);
+  const detail = device.state ?? (device.type === 'unknown' ? '' : device.type);
+
+  return detail ? `${platformLabel} / ${detail}` : platformLabel;
+}
+
+function renderDevicePlatformIcon(platform: DevicePlatform, size = 20): ReactElement {
+  const iconProps = {
+    'aria-hidden': true,
+    className: 'device-platform-icon',
+    size
+  };
+
+  if (platform === 'android') {
+    return <Bot {...iconProps} />;
+  }
+
+  if (platform === 'ios') {
+    return <Apple {...iconProps} />;
+  }
+
+  if (platform === 'web') {
+    return <MonitorSmartphone {...iconProps} />;
+  }
+
+  return <Smartphone {...iconProps} />;
+}
+
+function groupDevicesByPlatform(devices: DeviceInfo[]): DevicePlatformGroup[] {
+  const groupedDevices = devices.reduce<Map<DevicePlatform, DeviceInfo[]>>((groups, device) => {
+    groups.set(device.platform, [...(groups.get(device.platform) ?? []), device]);
+    return groups;
+  }, new Map());
+
+  return DEVICE_PLATFORM_ORDER
+    .map((platform) => ({
+      platform,
+      label: getDevicePlatformLabel(platform),
+      devices: groupedDevices.get(platform) ?? []
+    }))
+    .filter((group) => group.devices.length > 0);
 }
 
 function ServiceStatusCard({
@@ -438,21 +562,25 @@ export function openAllowedViewerUrl(value: string, opener: ViewerOpener): boole
 
 export function DeviceListPanel({
   devices,
+  density = 'comfortable',
   framed = true,
   selectedDeviceId,
   onSelectDevice,
   onCheckDevices,
   onStartDevice,
+  onStopDevice,
   deviceAction,
   language = 'en',
   selectionMode = 'select'
 }: {
   devices: DeviceInfo[];
+  density?: DevicePanelDensity;
   framed?: boolean;
   selectedDeviceId?: string;
   onSelectDevice?: (deviceId: string) => void;
   onCheckDevices?: () => void;
   onStartDevice?: (device: DeviceInfo) => void;
+  onStopDevice?: (device: DeviceInfo) => void;
   deviceAction?: DeviceActionState;
   language?: Language;
   selectionMode?: 'manage' | 'select';
@@ -462,9 +590,171 @@ export function DeviceListPanel({
   const copy = COPY[language];
   const checkingDevices = deviceAction?.status === 'busy' && !deviceAction.deviceId;
   const selectable = selectionMode === 'select';
+  const compact = selectable && density === 'compact';
+  const [compactPickerOpen, setCompactPickerOpen] = useState(false);
+  const selectedDevice = getSelectedDevice(devices, selectedDeviceId ?? '');
+  const showDeviceActionDetail = Boolean(
+    deviceAction &&
+      !isDeviceInspectionActionDetail(deviceAction.detail) &&
+      (!compact || deviceAction.status === 'error' || deviceAction.deviceId)
+  );
+  const panelClassName = [
+    framed ? 'panel device-panel' : 'device-panel',
+    compact ? 'compact-device-panel' : ''
+  ].filter(Boolean).join(' ');
+  const devicePlatformGroups = groupDevicesByPlatform(devices);
+  const compactOptionsId = 'task-device-options';
+  const renderDeviceRow = (device: DeviceInfo): ReactElement => {
+    const executable = isExecutableDevice(device);
+    const startable = isStartableDevice(device);
+    const stoppable = isStoppableDevice(device);
+    const busyDevice = deviceAction?.status === 'busy' && deviceAction.deviceId === device.id;
+    const selected = selectedDeviceId === device.id;
+
+    return (
+      <li
+        key={device.id}
+        className={[
+          'device-row',
+          selected ? 'selected' : '',
+          executable ? '' : 'disabled-row'
+        ].filter(Boolean).join(' ')}
+      >
+        {selectable ? (
+          <label className="device-row-main">
+            <input
+              type="radio"
+              name="target-device"
+              checked={selectedDeviceId === device.id}
+              disabled={!executable}
+              onChange={() => onSelectDevice?.(device.id)}
+            />
+            {renderDevicePlatformIcon(device.platform, 18)}
+            <span>
+              <strong>{device.name}</strong>
+              <small>{getDeviceSubtitle(device)}</small>
+            </span>
+          </label>
+        ) : (
+          <div className="device-row-info">
+            {renderDevicePlatformIcon(device.platform, 18)}
+            <span>
+              <strong>{device.name}</strong>
+              <small>{getDeviceSubtitle(device)}</small>
+            </span>
+          </div>
+        )}
+        <div className="device-actions">
+          <StatusPill
+            status={device.connected ? 'ready' : 'disconnected'}
+            language={language}
+          />
+          {startable && onStartDevice ? (
+            <button
+              className="icon-button compact-button"
+              disabled={deviceAction?.status === 'busy'}
+              onClick={() => onStartDevice(device)}
+              title={copy.titlesAttr.startVirtualDevice}
+              type="button"
+            >
+              {busyDevice ? (
+                <Loader2 className="spin" size={16} aria-hidden="true" />
+              ) : (
+                <Power size={16} aria-hidden="true" />
+              )}
+              {copy.actions.startDevice}
+            </button>
+          ) : null}
+          {stoppable && onStopDevice ? (
+            <button
+              className="icon-button compact-button"
+              disabled={deviceAction?.status === 'busy'}
+              onClick={() => onStopDevice(device)}
+              title={copy.titlesAttr.stopVirtualDevice}
+              type="button"
+            >
+              {busyDevice ? (
+                <Loader2 className="spin" size={16} aria-hidden="true" />
+              ) : (
+                <PowerOff size={16} aria-hidden="true" />
+              )}
+              {copy.actions.stopDevice}
+            </button>
+          ) : null}
+        </div>
+      </li>
+    );
+  };
+  const renderCompactDeviceOption = (device: DeviceInfo): ReactElement => {
+    const executable = isExecutableDevice(device);
+    const selected = selectedDeviceId === device.id;
+    const startable = isStartableDevice(device);
+    const stoppable = isStoppableDevice(device);
+    const busyDevice = deviceAction?.status === 'busy' && deviceAction.deviceId === device.id;
+
+    return (
+      <li
+        key={device.id}
+        className={[
+          'device-picker-option-item',
+          selected ? 'selected' : '',
+          executable ? '' : 'disabled-row'
+        ].filter(Boolean).join(' ')}
+      >
+        <button
+          aria-pressed={selected}
+          className="device-picker-option"
+          disabled={!executable}
+          onClick={() => {
+            onSelectDevice?.(device.id);
+            setCompactPickerOpen(false);
+          }}
+          type="button"
+        >
+          {renderDevicePlatformIcon(device.platform)}
+          <span>
+            <strong>{device.name}</strong>
+            <small>{getDeviceSubtitle(device)}</small>
+          </span>
+        </button>
+        {startable && onStartDevice ? (
+          <button
+            className="icon-button compact-button"
+            disabled={deviceAction?.status === 'busy'}
+            onClick={() => onStartDevice(device)}
+            title={copy.titlesAttr.startVirtualDevice}
+            type="button"
+          >
+            {busyDevice ? (
+              <Loader2 className="spin" size={16} aria-hidden="true" />
+            ) : (
+              <Power size={16} aria-hidden="true" />
+            )}
+            {copy.actions.startDevice}
+          </button>
+        ) : null}
+        {stoppable && onStopDevice ? (
+          <button
+            className="icon-button compact-button"
+            disabled={deviceAction?.status === 'busy'}
+            onClick={() => onStopDevice(device)}
+            title={copy.titlesAttr.stopVirtualDevice}
+            type="button"
+          >
+            {busyDevice ? (
+              <Loader2 className="spin" size={16} aria-hidden="true" />
+            ) : (
+              <PowerOff size={16} aria-hidden="true" />
+            )}
+            {copy.actions.stopDevice}
+          </button>
+        ) : null}
+      </li>
+    );
+  };
 
   return (
-    <article className={framed ? 'panel device-panel' : 'device-panel'} id={selectable ? 'task-devices' : 'devices'}>
+    <article className={panelClassName} id={selectable ? 'task-devices' : 'devices'}>
       <div className="panel-heading split">
         <div>
           <Smartphone size={20} aria-hidden="true" />
@@ -494,68 +784,45 @@ export function DeviceListPanel({
         </div>
       </div>
 
-      {devices.length ? (
-        <ul className="device-list">
-          {devices.map((device) => {
-            const executable = isExecutableDevice(device);
-            const startable = isStartableDevice(device);
-            const startingDevice = deviceAction?.status === 'busy' && deviceAction.deviceId === device.id;
-
-            return (
-              <li key={device.id} className={executable ? 'device-row' : 'device-row disabled-row'}>
-                {selectable ? (
-                  <label>
-                    <input
-                      type="radio"
-                      name="target-device"
-                      checked={selectedDeviceId === device.id}
-                      disabled={!executable}
-                      onChange={() => onSelectDevice?.(device.id)}
-                    />
-                    <span>
-                      <strong>{device.name}</strong>
-                      <small>
-                        {device.platform} / {device.type}
-                      </small>
-                    </span>
-                  </label>
-                ) : (
-                  <div className="device-row-info">
-                    <Smartphone size={16} aria-hidden="true" />
-                    <span>
-                      <strong>{device.name}</strong>
-                      <small>
-                        {device.platform} / {device.type}
-                      </small>
-                    </span>
-                  </div>
-                )}
-                <div className="device-actions">
-                  <StatusPill
-                    status={device.connected ? 'ready' : 'disconnected'}
-                    language={language}
-                  />
-                  {startable && onStartDevice ? (
-                    <button
-                      className="icon-button compact-button"
-                      disabled={deviceAction?.status === 'busy'}
-                      onClick={() => onStartDevice(device)}
-                      title={copy.titlesAttr.startVirtualDevice}
-                      type="button"
-                    >
-                      {startingDevice ? (
-                        <Loader2 className="spin" size={16} aria-hidden="true" />
-                      ) : (
-                        <Power size={16} aria-hidden="true" />
-                      )}
-                      {copy.actions.startDevice}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+      {compact && devices.length ? (
+        <div className="compact-device-control">
+          <button
+            aria-controls={compactOptionsId}
+            aria-expanded={compactPickerOpen}
+            className="device-select-trigger"
+            onClick={() => setCompactPickerOpen((open) => !open)}
+            type="button"
+          >
+            <span className={selectedDevice ? '' : 'device-select-placeholder'}>
+              {selectedDevice?.name ?? copy.runtime.notSelected}
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              className={compactPickerOpen ? 'device-select-chevron expanded' : 'device-select-chevron'}
+              size={20}
+            />
+          </button>
+          <div className="device-picker-menu" hidden={!compactPickerOpen} id={compactOptionsId}>
+            {devicePlatformGroups.map((group) => (
+              <section key={group.platform} className="device-picker-group" aria-label={group.label}>
+                <div className="device-picker-heading">{group.label}</div>
+                <ul className="device-picker-list">{group.devices.map(renderCompactDeviceOption)}</ul>
+              </section>
+            ))}
+          </div>
+        </div>
+      ) : devices.length ? (
+        <div className="device-platform-groups">
+          {devicePlatformGroups.map((group) => (
+            <section key={group.platform} className="device-platform-group" aria-label={group.label}>
+              <div className="device-platform-heading">
+                <span>{group.label}</span>
+                <small>{group.devices.length}</small>
+              </div>
+              <ul className="device-list">{group.devices.map(renderDeviceRow)}</ul>
+            </section>
+          ))}
+        </div>
       ) : (
         <EmptyDeviceState language={language} />
       )}
@@ -570,7 +837,7 @@ export function DeviceListPanel({
           )}
         </p>
       ) : null}
-      {deviceAction ? (
+      {showDeviceActionDetail && deviceAction ? (
         <p className={deviceAction.status === 'error' ? 'validation-message' : 'muted'}>
           {localizeText(deviceAction.detail, language)}
         </p>
@@ -690,6 +957,8 @@ export function TaskWorkspacePanel({
   onSelectTask,
   onStartDevice,
   onStartRun,
+  onStopDevice,
+  onTargetAppIdChange,
   onTaskDescriptionChange,
   onTaskNameChange,
   prompt = '',
@@ -700,6 +969,7 @@ export function TaskWorkspacePanel({
   taskAction,
   taskDescription,
   taskEditable = Boolean(currentTask),
+  targetAppId = '',
   taskName,
   uploadState = createInitialUploadState(),
   tasks
@@ -725,6 +995,8 @@ export function TaskWorkspacePanel({
   onSelectTask: (taskId: string) => void;
   onStartDevice?: (device: DeviceInfo) => void;
   onStartRun?: () => void;
+  onStopDevice?: (device: DeviceInfo) => void;
+  onTargetAppIdChange?: (value: string) => void;
   onTaskDescriptionChange: (value: string) => void;
   onTaskNameChange: (value: string) => void;
   prompt?: string;
@@ -735,6 +1007,7 @@ export function TaskWorkspacePanel({
   taskAction: RunActionState;
   taskDescription: string;
   taskEditable?: boolean;
+  targetAppId?: string;
   taskName: string;
   uploadState?: UploadState;
   tasks: TestTask[];
@@ -748,6 +1021,11 @@ export function TaskWorkspacePanel({
       reasons: [currentTask ? 'Select a connected Android or iOS device.' : 'Create a test task before execution.'],
       ...(selectedDevice ? { selectedDevice } : {})
     };
+  const taskLogs = currentTask?.logs ?? [];
+  const runButtonLabel =
+    currentTask && (currentTask.latestRunId || currentTask.runIds?.length) && !isActiveTaskStatus(currentTask.status)
+      ? copy.actions.retest
+      : copy.actions.startRun;
 
   return (
     <section className="task-workspace-layout" id="task">
@@ -918,11 +1196,13 @@ export function TaskWorkspacePanel({
               <section className="task-detail-section" data-task-detail-section="devices">
                 <DeviceListPanel
                   devices={devices}
+                  density="compact"
                   framed={false}
                   selectedDeviceId={selectedDeviceId}
                   onSelectDevice={onSelectDevice}
                   onCheckDevices={onCheckDevices}
                   onStartDevice={onStartDevice}
+                  onStopDevice={onStopDevice}
                   deviceAction={deviceAction}
                   language={language}
                   selectionMode="select"
@@ -968,6 +1248,17 @@ export function TaskWorkspacePanel({
                       <MessageSquare size={18} aria-hidden="true" />
                       <strong>{copy.copy.naturalLanguageLabel}</strong>
                     </label>
+                    <label className="field-label" htmlFor="target-app-id-input">
+                      {copy.fields.targetAppId}
+                    </label>
+                    <input
+                      id="target-app-id-input"
+                      className="text-input"
+                      value={targetAppId}
+                      disabled={!taskEditable}
+                      onChange={(event) => onTargetAppIdChange?.(event.target.value)}
+                      placeholder={copy.copy.targetAppIdPlaceholder}
+                    />
                     <textarea
                       id="prompt-input"
                       className="prompt-input"
@@ -1013,7 +1304,7 @@ export function TaskWorkspacePanel({
                     ) : (
                       <Play size={18} aria-hidden="true" />
                     )}
-                    {copy.actions.startRun}
+                    {runButtonLabel}
                   </button>
                   {isActiveTaskStatus(currentTask.status) ? (
                     <button
@@ -1046,6 +1337,42 @@ export function TaskWorkspacePanel({
                     ))}
                   </ol>
                 ) : null}
+              </section>
+
+              <section className="task-detail-section" data-task-detail-section="logs">
+                <div className="panel-heading split">
+                  <div>
+                    <History size={20} aria-hidden="true" />
+                    <h2>{copy.titles.taskLogs}</h2>
+                  </div>
+                </div>
+                {taskLogs.length ? (
+                  <ol className="task-log-list">
+                    {[...taskLogs].reverse().map((entry) => {
+                      const meta = [
+                        formatDateTime(entry.createdAt, language),
+                        entry.status ? formatStatusLabel(entry.status, language) : '',
+                        entry.runId ?? '',
+                        entry.reportPath ?? ''
+                      ].filter(Boolean);
+
+                      return (
+                        <li key={entry.id}>
+                          <strong>{localizeText(entry.message, language)}</strong>
+                          <small>{meta.join(' / ')}</small>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : (
+                  <div className="empty-state">
+                    <History aria-hidden="true" size={20} />
+                    <div>
+                      <strong>{copy.empty.noTaskLogsTitle}</strong>
+                      <span>{copy.empty.noTaskLogsDetail}</span>
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="task-detail-section" data-task-detail-section="report">
@@ -1112,6 +1439,7 @@ export function App(): ReactElement {
     : null;
   const selectedDeviceId = currentTaskWorkspace?.selectedDeviceId ?? '';
   const prompt = currentTaskWorkspace?.prompt ?? '';
+  const targetAppId = currentTaskWorkspace?.targetAppId ?? '';
   const uploadState = currentTaskWorkspace?.uploadState ?? createInitialUploadState();
   const runAction = currentTaskWorkspace?.runAction ?? createIdleRunAction();
   const reportExport = currentTaskWorkspace?.reportExport ?? createIdleReportExportAction();
@@ -1124,9 +1452,10 @@ export function App(): ReactElement {
         devices,
         selectedDeviceId,
         task: currentTask,
-        prompt
+        prompt,
+        targetAppId
       }),
-    [currentTask, devices, environment, prompt, selectedDeviceId]
+    [currentTask, devices, environment, prompt, selectedDeviceId, targetAppId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
   const currentTaskCase = currentTask?.input.testCase;
@@ -1212,7 +1541,7 @@ export function App(): ReactElement {
   ];
 
   function canReuseTask(task: TestTask | null): task is TestTask {
-    return Boolean(task && !task.latestRunId && !isActiveTaskStatus(task.status) && !isTerminalTaskStatus(task.status));
+    return Boolean(task && !isActiveTaskStatus(task.status));
   }
 
   function mergeTaskWorkspaceState(
@@ -1224,7 +1553,8 @@ export function App(): ReactElement {
     return {
       ...fallback,
       selectedDeviceId: fallback.selectedDeviceId || task.deviceId || '',
-      prompt: fallback.prompt || task.input.naturalLanguage?.prompt || ''
+      prompt: fallback.prompt || task.input.naturalLanguage?.prompt || '',
+      targetAppId: fallback.targetAppId || task.targetAppId || ''
     };
   }
 
@@ -1304,22 +1634,32 @@ export function App(): ReactElement {
     });
   }
 
-  async function syncTaskPrompt(task: TestTask, nextPrompt: string): Promise<TestTask> {
+  async function syncTaskInput(
+    task: TestTask,
+    nextPrompt: string,
+    nextTargetAppId: string
+  ): Promise<TestTask> {
     const normalizedPrompt = nextPrompt.trim();
     const currentPrompt = task.input.naturalLanguage?.prompt ?? '';
+    const normalizedTargetAppId = nextTargetAppId.trim();
+    const currentTargetAppId = task.targetAppId ?? '';
 
-    if (normalizedPrompt === currentPrompt) {
+    if (normalizedPrompt === currentPrompt && normalizedTargetAppId === currentTargetAppId) {
       return task;
     }
 
     const updatedTask = await api.tasks.updateInput({
       taskId: task.id,
-      ...(normalizedPrompt ? { prompt: normalizedPrompt } : {})
+      ...(normalizedPrompt ? { prompt: normalizedPrompt } : {}),
+      targetAppId: normalizedTargetAppId
     });
 
     upsertTask(updatedTask);
     updateTaskWorkspaceState(updatedTask.id, {
-      prompt: updatedTask.input.naturalLanguage?.prompt ?? ''
+      prompt: updatedTask.input.naturalLanguage?.prompt ?? '',
+      targetAppId: updatedTask.targetAppId ?? normalizedTargetAppId,
+      report: null,
+      reportExport: createIdleReportExportAction()
     });
     return updatedTask;
   }
@@ -1466,6 +1806,42 @@ export function App(): ReactElement {
     void refreshRuntime();
   }, []);
 
+  function applyDevicesAfterRefresh(
+    nextDevices: DeviceInfo[],
+    options: { updateTaskSelection: boolean }
+  ): void {
+    setDevices(nextDevices);
+    if (options.updateTaskSelection && currentTask) {
+      updateTaskWorkspaceState(currentTask.id, (current) => ({
+        ...current,
+        selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
+      }));
+    }
+  }
+
+  async function waitForDeviceRefresh(delayMs: number): Promise<void> {
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, delayMs);
+    });
+  }
+
+  async function refreshDevicesAfterStart(
+    startedDevice: DeviceInfo,
+    previouslyConnectedDeviceIds: ReadonlySet<string>,
+    options: { updateTaskSelection: boolean }
+  ): Promise<void> {
+    for (const delayMs of DEVICE_START_REFRESH_DELAYS_MS) {
+      await waitForDeviceRefresh(delayMs);
+      const nextDevices = await api.devices.list();
+
+      applyDevicesAfterRefresh(nextDevices, options);
+
+      if (hasStartedDeviceAppeared(nextDevices, startedDevice, previouslyConnectedDeviceIds)) {
+        return;
+      }
+    }
+  }
+
   async function refreshDevices(options: { updateTaskSelection: boolean }): Promise<void> {
     setDeviceAction({
       status: 'busy',
@@ -1476,13 +1852,7 @@ export function App(): ReactElement {
       const nextDevices = await api.devices.list();
       const summary = getDeviceInspectionSummary(nextDevices);
 
-      setDevices(nextDevices);
-      if (options.updateTaskSelection && currentTask) {
-        updateTaskWorkspaceState(currentTask.id, (current) => ({
-          ...current,
-          selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
-        }));
-      }
+      applyDevicesAfterRefresh(nextDevices, options);
       setDeviceAction({
         status: 'success',
         detail: `Found ${summary.totalSupported} supported device(s): ${summary.connected} connected, ${summary.virtual} virtual, ${summary.physical} physical.`
@@ -1520,19 +1890,21 @@ export function App(): ReactElement {
     });
 
     try {
+      const previouslyConnectedDeviceIds = new Set(
+        devices
+          .filter((currentDevice) => currentDevice.connected)
+          .map((currentDevice) => currentDevice.id)
+      );
       const result = await api.devices.start(device.id);
-      const nextDevices = result.device ? devices.map((currentDevice) =>
-        currentDevice.id === result.device?.id ? result.device : currentDevice
-      ) : await api.devices.list();
+      const nextDevices = result.device
+        ? replaceDeviceInList(devices, device.id, result.device)
+        : await api.devices.list();
 
-      setDevices(nextDevices);
-      if (options.updateTaskSelection && currentTask) {
-        updateTaskWorkspaceState(currentTask.id, (current) => ({
-          ...current,
-          selectedDeviceId: getPreferredDeviceId(nextDevices, current.selectedDeviceId)
-        }));
-      }
+      applyDevicesAfterRefresh(nextDevices, options);
       setDeviceAction(mapDeviceStartResultToAction(result, device.name));
+      if (result.status === 'starting') {
+        await refreshDevicesAfterStart(device, previouslyConnectedDeviceIds, options);
+      }
     } catch (error) {
       setDeviceAction({
         status: 'error',
@@ -1548,6 +1920,47 @@ export function App(): ReactElement {
 
   async function handleManageStartDevice(device: DeviceInfo): Promise<void> {
     await startDevice(device, { updateTaskSelection: false });
+  }
+
+  async function stopDevice(device: DeviceInfo, options: { updateTaskSelection: boolean }): Promise<void> {
+    if (!isStoppableDevice(device)) {
+      setDeviceAction({
+        status: 'error',
+        detail: `${device.name} cannot be stopped from the desktop client.`,
+        deviceId: device.id
+      });
+      return;
+    }
+
+    setDeviceAction({
+      status: 'busy',
+      detail: `Stopping ${device.name}.`,
+      deviceId: device.id
+    });
+
+    try {
+      const result = await api.devices.stop(device.id);
+      const nextDevices = result.device
+        ? replaceDeviceInList(devices, device.id, result.device)
+        : await api.devices.list();
+
+      applyDevicesAfterRefresh(nextDevices, options);
+      setDeviceAction(mapDeviceStopResultToAction(result, device.name));
+    } catch (error) {
+      setDeviceAction({
+        status: 'error',
+        detail: getErrorMessage(error),
+        deviceId: device.id
+      });
+    }
+  }
+
+  async function handleStopDevice(device: DeviceInfo): Promise<void> {
+    await stopDevice(device, { updateTaskSelection: true });
+  }
+
+  async function handleManageStopDevice(device: DeviceInfo): Promise<void> {
+    await stopDevice(device, { updateTaskSelection: false });
   }
 
   async function handleViewerProbe(): Promise<void> {
@@ -1635,7 +2048,7 @@ export function App(): ReactElement {
     });
 
     try {
-      const task = await syncTaskPrompt(currentTask, prompt);
+      const task = await syncTaskInput(currentTask, prompt, targetAppId);
       const updatedTask = await api.tasks.importCase({
         taskId: task.id,
         ...createCaseImportRequest(fileCandidate)
@@ -1644,6 +2057,8 @@ export function App(): ReactElement {
 
       upsertTask(updatedTask);
       updateTaskWorkspaceState(updatedTask.id, {
+        report: null,
+        reportExport: createIdleReportExportAction(),
         uploadState: {
           name: taskCase?.name ?? file.name,
           status: taskCase ? 'accepted' : 'rejected',
@@ -1664,7 +2079,9 @@ export function App(): ReactElement {
   }
 
   async function pollTaskUntilSettled(taskId: string): Promise<void> {
-    for (let attempt = 0; attempt < RUN_STATUS_MAX_POLLS; attempt += 1) {
+    const startedPollingAt = Date.now();
+
+    while (Date.now() - startedPollingAt < RUN_STATUS_POLL_TIMEOUT_MS) {
       const latestTask = await api.tasks.get(taskId);
       const latestReport = await api.tasks.getReport(taskId);
 
@@ -1733,10 +2150,11 @@ export function App(): ReactElement {
     }));
 
     try {
-      const task = await syncTaskPrompt(currentTask, prompt);
+      const task = await syncTaskInput(currentTask, prompt, targetAppId);
       const startedTask = await api.tasks.start({
         taskId: task.id,
-        deviceId: readiness.selectedDevice.id
+        deviceId: readiness.selectedDevice.id,
+        targetAppId: targetAppId.trim()
       });
       const nextReport = await api.tasks.getReport(startedTask.id);
 
@@ -1862,7 +2280,9 @@ export function App(): ReactElement {
     <main className="app-shell">
       <aside className="sidebar" aria-label={copy.shell.navigationLabel}>
         <div className="brand-lockup">
-          <MonitorSmartphone aria-hidden="true" size={28} />
+          <span className="brand-mark">
+            <MonitorSmartphone aria-hidden="true" size={22} />
+          </span>
           <div>
             <strong>{copy.shell.brand}</strong>
             <span>{copy.shell.subtitle}</span>
@@ -1887,8 +2307,8 @@ export function App(): ReactElement {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <span className="eyebrow">{copy.shell.eyebrow}</span>
             <h1>{copy.shell.title}</h1>
+            <p className="topbar-subtitle">{copy.shell.description}</p>
           </div>
           <div className="topbar-actions">
             <div className="language-switcher" role="group" aria-label={copy.language.label}>
@@ -2004,6 +2424,8 @@ export function App(): ReactElement {
               onSelectTask={handleSelectTask}
               onStartDevice={(device) => void handleStartDevice(device)}
               onStartRun={() => void handleStartRun()}
+              onStopDevice={(device) => void handleStopDevice(device)}
+              onTargetAppIdChange={(value) => updateCurrentTaskWorkspaceState({ targetAppId: value })}
               onTaskDescriptionChange={setTaskDescription}
               onTaskNameChange={setTaskName}
               prompt={prompt}
@@ -2014,6 +2436,7 @@ export function App(): ReactElement {
               taskAction={taskAction}
               taskDescription={taskDescription}
               taskEditable={taskEditable}
+              targetAppId={targetAppId}
               taskName={taskName}
               uploadState={uploadState}
               agentMessages={agentMessages}
@@ -2028,6 +2451,7 @@ export function App(): ReactElement {
               devices={devices}
               onCheckDevices={() => void handleManageCheckDevices()}
               onStartDevice={(device) => void handleManageStartDevice(device)}
+              onStopDevice={(device) => void handleManageStopDevice(device)}
               deviceAction={deviceAction}
               language={language}
               selectionMode="manage"

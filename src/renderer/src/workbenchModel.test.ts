@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   DeviceInfo,
   DeviceStartResult,
+  DeviceStopResult,
   EnvironmentStatus,
   TestCaseManifest,
   TestTask,
@@ -18,9 +19,12 @@ import {
   getPreferredDeviceId,
   getRunReadiness,
   getSelectedTaskAfterRefresh,
+  hasStartedDeviceAppeared,
   isStartableDevice,
+  isStoppableDevice,
   isVirtualDevice,
   mapDeviceStartResultToAction,
+  mapDeviceStopResultToAction,
   mapViewerProbeResult,
   upsertTaskList,
   validateCaseFile,
@@ -172,16 +176,16 @@ describe('workbench run readiness', () => {
     expect(readiness.reasons).not.toContain('No connected Android or iOS device is available.');
   });
 
-  it('allows uploaded task runs without requiring an Agent prompt', () => {
+  it('blocks uploaded task runs when the Codex executor is unavailable', () => {
     const readiness = getRunReadiness({
       environment: createEnvironment({
         agent: {
           status: 'not_configured',
           label: 'Agent',
-          detail: 'Local agent confirmation is not available.'
+          detail: 'Codex CLI test executor is not available.'
         },
         canStartRun: false,
-        blockers: ['Local agent confirmation is not available.'],
+        blockers: ['Codex CLI test executor is not available.'],
         capabilities: {
           uploads: ['.yaml', '.yml'],
           reports: ['page', 'markdown'],
@@ -194,10 +198,55 @@ describe('workbench run readiness', () => {
       prompt: ''
     });
 
-    expect(readiness.canStart).toBe(true);
-    expect(readiness.reasons).toEqual([]);
+    expect(readiness.canStart).toBe(false);
+    expect(readiness.reasons).toEqual(['Codex CLI test executor is not available.']);
     expect(readiness.selectedDevice).toEqual(connectedDevice);
     expect(readiness.inputMode).toBe('test_case');
+  });
+
+  it('allows natural-language runs without a target app id because Codex executes them through MCP', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: createTask({
+        input: {
+          mode: 'natural_language',
+          naturalLanguage: {
+            prompt: '点击 登录',
+            updatedAt: '2026-06-12T06:00:00Z'
+          },
+          blockers: []
+        }
+      }),
+      prompt: '点击 登录'
+    });
+
+    expect(readiness.canStart).toBe(true);
+    expect(readiness.reasons).toEqual([]);
+  });
+
+  it('allows natural-language runs when the task target app id is set', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: createTask({
+        targetAppId: 'com.example.app',
+        input: {
+          mode: 'natural_language',
+          naturalLanguage: {
+            prompt: '点击 登录',
+            updatedAt: '2026-06-12T06:00:00Z'
+          },
+          blockers: []
+        }
+      }),
+      prompt: '点击 登录'
+    });
+
+    expect(readiness.canStart).toBe(true);
+    expect(readiness.reasons).toEqual([]);
   });
 
   it('blocks active task restarts instead of starting duplicate runs', () => {
@@ -213,7 +262,24 @@ describe('workbench run readiness', () => {
     });
 
     expect(readiness.canStart).toBe(false);
-    expect(readiness.reasons).toContain('Task task-1 has already been started.');
+    expect(readiness.reasons).toContain('Task task-1 is running.');
+  });
+
+  it('allows completed tasks to be retested with the existing input', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      selectedDeviceId: connectedDevice.id,
+      task: createTask({
+        status: 'succeeded',
+        latestRunId: 'run-1',
+        runIds: ['run-1']
+      }),
+      prompt: ''
+    });
+
+    expect(readiness.canStart).toBe(true);
+    expect(readiness.reasons).toEqual([]);
   });
 });
 
@@ -340,6 +406,37 @@ describe('workbench device inspection', () => {
     expect(isStartableDevice(disconnectedDevice)).toBe(false);
     expect(isStartableDevice(offlineAdbEmulator)).toBe(false);
     expect(isStartableDevice(disconnectedPhysicalDevice)).toBe(false);
+    expect(isStoppableDevice(connectedDevice)).toBe(true);
+    expect(isStoppableDevice(launchableSimulator)).toBe(false);
+    expect(isStoppableDevice(disconnectedPhysicalDevice)).toBe(false);
+  });
+
+  it('detects a newly visible runtime device after a virtual device start', () => {
+    const startedDevice = {
+      ...launchableSimulator,
+      id: 'android-avd:Medium_Phone',
+      name: 'Medium Phone',
+      platform: 'android' as const,
+      type: 'emulator' as const
+    };
+    const previousConnectedDeviceIds = new Set(['emulator-5556']);
+
+    expect(
+      hasStartedDeviceAppeared(
+        [
+          { ...connectedDevice, id: 'emulator-5556' },
+          {
+            id: 'emulator-5554',
+            name: 'Medium Phone',
+            platform: 'android',
+            type: 'emulator',
+            connected: true
+          }
+        ],
+        startedDevice,
+        previousConnectedDeviceIds
+      )
+    ).toBe(true);
   });
 
   it('maps backend device start statuses into renderer action states', () => {
@@ -353,7 +450,7 @@ describe('workbench device inspection', () => {
         'Pixel 8'
       )
     ).toEqual({
-      status: 'busy',
+      status: 'success',
       detail: 'Android emulator Pixel_8 is starting.',
       deviceId: 'android-avd:Pixel_8'
     });
@@ -384,6 +481,34 @@ describe('workbench device inspection', () => {
     ).toMatchObject({
       status: 'error',
       detail: 'Physical and adb devices cannot be launched.'
+    });
+
+    expect(
+      mapDeviceStopResultToAction(
+        {
+          deviceId: 'ios-simulator-1',
+          status: 'stopped',
+          detail: 'Stopped iOS simulator "iPhone 16".'
+        } as DeviceStopResult,
+        'iPhone 16'
+      )
+    ).toMatchObject({
+      status: 'success',
+      detail: 'Stopped iOS simulator "iPhone 16".'
+    });
+
+    expect(
+      mapDeviceStopResultToAction(
+        {
+          deviceId: 'ios-physical-1',
+          status: 'not_stoppable',
+          detail: 'Physical devices cannot be stopped.'
+        } as DeviceStopResult,
+        'Jane iPhone'
+      )
+    ).toMatchObject({
+      status: 'error',
+      detail: 'Physical devices cannot be stopped.'
     });
   });
 });
@@ -556,6 +681,16 @@ describe('workbench localization', () => {
     );
     expect(localizeText(blockedState.detail, 'en')).toBe(
       'Viewer URL must point to localhost, 127.0.0.1, or ::1.'
+    );
+  });
+
+  it('localizes virtual device stop feedback for Chinese rendering', () => {
+    expect(localizeText('Stopping Medium Phone.', 'zh')).toBe('正在关闭 Medium Phone。');
+    expect(localizeText('Stopped Android virtual device "Medium Phone".', 'zh')).toBe(
+      '已关闭 Android 虚拟设备“Medium Phone”。'
+    );
+    expect(localizeText('Device Medium Phone stop returned stopped.', 'zh')).toBe(
+      '设备 Medium Phone 关闭返回：已关闭。'
     );
   });
 

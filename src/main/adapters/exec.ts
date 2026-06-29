@@ -19,6 +19,7 @@ export type ExecFile = (
   args: string[],
   options?: {
     env?: NodeJS.ProcessEnv;
+    input?: string;
     signal?: AbortSignal;
     timeout?: number;
   }
@@ -34,7 +35,7 @@ export type SpawnFile = (
 
 export const nodeExecFile: ExecFile = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       file,
       args,
       {
@@ -56,6 +57,8 @@ export const nodeExecFile: ExecFile = (file, args, options = {}) =>
         resolve({ stdout, stderr });
       }
     );
+
+    child.stdin?.end(options.input ?? '');
   });
 
 export const nodeSpawnFile: SpawnFile = (file, args, options = {}) =>

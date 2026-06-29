@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { IPC_CHANNELS } from '../../shared/ipcChannels';
-import type { AgentProvider } from '../adapters/agent/AgentProvider';
+import type { AgentProvider, AgentTestExecutionRequest } from '../adapters/agent/AgentProvider';
 import { StaticMaestroProvider } from '../adapters/maestro/MaestroProvider';
 import { createDefaultServices } from '../services';
 import { createIpcHandlers, invokeIpcHandler } from './ipcHandlers';
@@ -32,6 +32,14 @@ const testAgentProvider: AgentProvider = {
       role: 'assistant',
       content: 'Agent provider is disabled for IPC tests.',
       createdAt: '2026-06-12T06:00:00Z'
+    };
+  },
+  async runTest(_request: AgentTestExecutionRequest) {
+    return {
+      status: 'failed' as const,
+      stdout: '',
+      stderr: '',
+      failureReason: 'Agent provider is disabled for IPC tests.'
     };
   }
 };
@@ -105,12 +113,24 @@ describe('main process IPC handlers', () => {
       },
       canStartRun: false
     });
-    await expect(invokeIpcHandler(handlers, IPC_CHANNELS.devices.list)).resolves.toEqual([]);
+    await expect(invokeIpcHandler(handlers, IPC_CHANNELS.devices.list)).resolves.toEqual([
+      expect.objectContaining({
+        id: 'web-viewer',
+        platform: 'web',
+        state: 'http://127.0.0.1:10000/'
+      })
+    ]);
     await expect(
       invokeIpcHandler(handlers, IPC_CHANNELS.devices.start, { deviceId: 'ios-shutdown' })
     ).resolves.toMatchObject({
       status: 'failed',
       detail: expect.stringContaining('ios-shutdown')
+    });
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.devices.stop, { deviceId: 'web-viewer' })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      detail: expect.stringContaining('web-viewer')
     });
   });
 
@@ -128,6 +148,7 @@ describe('main process IPC handlers', () => {
         IPC_CHANNELS.cases.import,
         IPC_CHANNELS.devices.list,
         IPC_CHANNELS.devices.start,
+        IPC_CHANNELS.devices.stop,
         IPC_CHANNELS.env.getStatus,
         IPC_CHANNELS.reports.export,
         IPC_CHANNELS.reports.get,

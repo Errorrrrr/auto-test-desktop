@@ -6,6 +6,7 @@ import type {
   AppAutoTestApi,
   DeviceInfo,
   DeviceStartResult,
+  DeviceStopResult,
   EnvironmentStatus,
   ReportExportRequest,
   TaskCreateRequest,
@@ -33,7 +34,8 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
     },
     devices: {
       list: () => invoke<DeviceInfo[]>(IPC_CHANNELS.devices.list),
-      start: (deviceId: string) => invoke<DeviceStartResult>(IPC_CHANNELS.devices.start, { deviceId })
+      start: (deviceId: string) => invoke<DeviceStartResult>(IPC_CHANNELS.devices.start, { deviceId }),
+      stop: (deviceId: string) => invoke<DeviceStopResult>(IPC_CHANNELS.devices.stop, { deviceId })
     },
     viewer: {
       getConfig: () => invoke<ViewerConfig>(IPC_CHANNELS.viewer.getConfig),

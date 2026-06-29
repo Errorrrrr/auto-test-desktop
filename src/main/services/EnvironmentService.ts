@@ -36,7 +36,7 @@ export class EnvironmentService {
     const blockers = [
       ...(hasConnectedDevice ? [] : ['No connected Android or iOS device is available.']),
       ...(isUsableMaestroStatus(maestro.status) ? [] : ['Maestro provider is not available.']),
-      ...(isUsableAgentStatus(agent.status) ? [] : ['Local agent confirmation is not available.'])
+      ...(isUsableAgentStatus(agent.status) ? [] : ['Codex CLI test executor is not available.'])
     ];
 
     return {

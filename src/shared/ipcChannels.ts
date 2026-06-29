@@ -4,7 +4,8 @@ export const IPC_CHANNELS = {
   },
   devices: {
     list: 'devices:list',
-    start: 'devices:start'
+    start: 'devices:start',
+    stop: 'devices:stop'
   },
   viewer: {
     getConfig: 'viewer:get-config',
