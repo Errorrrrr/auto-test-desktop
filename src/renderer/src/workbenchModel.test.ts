@@ -434,6 +434,50 @@ describe('workbench task run log summaries', () => {
       detailCount: 2
     });
   });
+
+  it('uses the live task status for the latest run summary while execution is active', () => {
+    const summaries = buildTaskRunLogSummaries(createTask({
+      status: 'running',
+      latestRunId: 'run-2',
+      runIds: ['run-1', 'run-2'],
+      updatedAt: '2026-06-25T04:02:00.000Z',
+      logs: [
+        {
+          id: 'log-run-1-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T03:00:00.000Z',
+          runId: 'run-1',
+          status: 'queued'
+        },
+        {
+          id: 'log-run-1-complete',
+          kind: 'run_completed',
+          message: 'Run finished.',
+          createdAt: '2026-06-25T03:05:00.000Z',
+          runId: 'run-1',
+          status: 'failed'
+        },
+        {
+          id: 'log-run-2-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T04:00:00.000Z',
+          runId: 'run-2',
+          status: 'queued'
+        }
+      ]
+    }));
+
+    expect(summaries[0]).toMatchObject({
+      runId: 'run-2',
+      status: 'running'
+    });
+    expect(summaries[1]).toMatchObject({
+      runId: 'run-1',
+      status: 'failed'
+    });
+  });
 });
 
 describe('workbench device inspection', () => {

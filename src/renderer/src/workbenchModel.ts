@@ -101,6 +101,7 @@ export const INITIAL_VIEWER_PROBE_STATE: ViewerProbeState = createInitialViewerP
 
 const EXECUTABLE_PLATFORMS = new Set(['android', 'ios']);
 const VIRTUAL_DEVICE_TYPES = new Set(['emulator', 'simulator']);
+const ACTIVE_TASK_STATUSES = new Set<TestTaskStatus>(['queued', 'running']);
 
 export function isExecutableDevice(device: DeviceInfo): boolean {
   return EXECUTABLE_PLATFORMS.has(device.platform) && device.connected;
@@ -348,6 +349,8 @@ export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSumma
       const latestStatusEntry = [...entries].reverse().find((entry) => entry.status);
       const latestReportEntry = [...entries].reverse().find((entry) => entry.reportPath);
       const isLatestTaskRun = runId === task.latestRunId;
+      const latestLiveStatus =
+        isLatestTaskRun && ACTIVE_TASK_STATUSES.has(task.status) ? task.status : undefined;
       const startedAt = entries[0]?.createdAt ?? (isLatestTaskRun ? task.startedAt : undefined) ?? task.createdAt;
       const updatedAt =
         latestEntry?.createdAt ??
@@ -359,7 +362,7 @@ export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSumma
         entries,
         startedAt,
         updatedAt,
-        status: latestStatusEntry?.status ?? (isLatestTaskRun ? task.status : undefined),
+        status: latestLiveStatus ?? latestStatusEntry?.status ?? (isLatestTaskRun ? task.status : undefined),
         reportPath: latestReportEntry?.reportPath,
         detailCount: entries.length
       };
