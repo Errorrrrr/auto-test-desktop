@@ -12,6 +12,7 @@ import type {
 import {
   createInitialUploadState,
   createCaseImportRequest,
+  buildTaskRunLogSummaries,
   createReportPlaceholder,
   formatStatusLabel,
   getCurrentTaskAfterRefresh,
@@ -362,6 +363,76 @@ describe('workbench task refresh', () => {
       updatedOlderTask,
       currentTask
     ]);
+  });
+});
+
+describe('workbench task run log summaries', () => {
+  it('groups flat task log entries into newest-first per-run summaries', () => {
+    const summaries = buildTaskRunLogSummaries(createTask({
+      latestRunId: 'run-2',
+      runIds: ['run-1', 'run-2'],
+      logs: [
+        {
+          id: 'log-created',
+          kind: 'task_created',
+          message: 'Task task-1 created.',
+          createdAt: '2026-06-25T02:00:00.000Z',
+          status: 'draft'
+        },
+        {
+          id: 'log-run-1-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T03:00:00.000Z',
+          runId: 'run-1',
+          status: 'queued'
+        },
+        {
+          id: 'log-run-1-complete',
+          kind: 'run_completed',
+          message: 'Run finished.',
+          createdAt: '2026-06-25T03:04:00.000Z',
+          runId: 'run-1',
+          status: 'failed'
+        },
+        {
+          id: 'log-run-2-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T04:00:00.000Z',
+          runId: 'run-2',
+          status: 'queued'
+        },
+        {
+          id: 'log-run-2-report',
+          kind: 'report_generated',
+          message: 'Markdown report exported.',
+          createdAt: '2026-06-25T04:06:00.000Z',
+          runId: 'run-2',
+          reportPath: '/tmp/task-1/reports/task-1.md',
+          status: 'succeeded'
+        }
+      ]
+    }));
+
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatchObject({
+      runId: 'run-2',
+      status: 'succeeded',
+      startedAt: '2026-06-25T04:00:00.000Z',
+      updatedAt: '2026-06-25T04:06:00.000Z',
+      reportPath: '/tmp/task-1/reports/task-1.md',
+      detailCount: 2
+    });
+    expect(summaries[0].entries.map((entry) => entry.id)).toEqual([
+      'log-run-2-start',
+      'log-run-2-report'
+    ]);
+    expect(summaries[1]).toMatchObject({
+      runId: 'run-1',
+      status: 'failed',
+      detailCount: 2
+    });
   });
 });
 

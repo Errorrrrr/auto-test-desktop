@@ -246,7 +246,7 @@ describe('workbench panels', () => {
     expect(html).not.toContain('Pixel 8');
   });
 
-  it('renders task logs and a retest action for completed tasks', () => {
+  it('renders task logs as per-run summaries with expandable details', () => {
     const selectedTask = createTask({
       id: 'task-history',
       name: 'History task',
@@ -255,6 +255,14 @@ describe('workbench panels', () => {
       latestRunId: 'run-2',
       runIds: ['run-1', 'run-2'],
       logs: [
+        {
+          id: 'log-run-1-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T02:00:00.000Z',
+          runId: 'run-1',
+          status: 'queued'
+        },
         {
           id: 'log-start',
           kind: 'run_started',
@@ -298,6 +306,16 @@ describe('workbench panels', () => {
     expect(html).toContain('Task Logs');
     expect(html).toContain('Retest');
     expect(html).toContain('value="com.example.history"');
+    expect(html).toContain('class="task-run-log-list"');
+    expect(html).not.toContain('class="task-log-list"');
+    expect(html.match(/data-task-run-log-id=/g)).toHaveLength(2);
+    expect(html).toContain('data-task-run-log-id="run-2"');
+    expect(html).toContain('Run run-2');
+    expect(html).toContain('2 detail records');
+    expect(html).toContain('data-task-run-log-id="run-1"');
+    expect(html).toContain('Run run-1');
+    expect(html).toContain('1 detail record');
+    expect(html).toMatch(/<details class="task-run-log-details"><summary/);
     expect(html).toContain('Run started.');
     expect(html).toContain('Markdown report exported.');
     expect(html).toContain('run-2');

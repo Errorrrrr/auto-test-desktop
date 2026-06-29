@@ -5,6 +5,7 @@ import type {
   EnvironmentStatus,
   ReportFormat,
   ServiceStatus,
+  TaskLogEntry,
   TestCaseImportRequest,
   TestCaseManifest,
   TestReport,
@@ -12,6 +13,7 @@ import type {
   TaskInputMode,
   TestRun,
   TestRunStatus,
+  TestTaskStatus,
   ViewerProbeResult,
   ViewerReachability
 } from '../../shared/types';
@@ -67,6 +69,16 @@ export type FileCandidate = {
   name: string;
   size: number;
   path?: string;
+};
+
+export type TaskRunLogSummary = {
+  runId: string;
+  entries: TaskLogEntry[];
+  startedAt: string;
+  updatedAt: string;
+  status?: TestTaskStatus;
+  reportPath?: string;
+  detailCount: number;
 };
 
 export function createInitialUploadState(): UploadState {
@@ -293,6 +305,74 @@ export function upsertTaskList(tasks: TestTask[], nextTask: TestTask): TestTask[
 
     return right.id.localeCompare(left.id);
   });
+}
+
+function getSortableTime(value: string): number {
+  const timestamp = Date.parse(value);
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function addUniqueRunId(runIds: string[], runId: string | undefined): void {
+  if (runId && !runIds.includes(runId)) {
+    runIds.push(runId);
+  }
+}
+
+export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSummary[] {
+  if (!task) {
+    return [];
+  }
+
+  const logs = task.logs ?? [];
+  const runIds: string[] = [];
+
+  for (const runId of task.runIds ?? []) {
+    addUniqueRunId(runIds, runId);
+  }
+
+  addUniqueRunId(runIds, task.latestRunId);
+
+  for (const entry of logs) {
+    addUniqueRunId(runIds, entry.runId);
+  }
+
+  const runOrder = new Map(runIds.map((runId, index) => [runId, index]));
+
+  return runIds
+    .map((runId): TaskRunLogSummary => {
+      const entries = logs
+        .filter((entry) => entry.runId === runId)
+        .sort((left, right) => getSortableTime(left.createdAt) - getSortableTime(right.createdAt));
+      const latestEntry = entries[entries.length - 1];
+      const latestStatusEntry = [...entries].reverse().find((entry) => entry.status);
+      const latestReportEntry = [...entries].reverse().find((entry) => entry.reportPath);
+      const isLatestTaskRun = runId === task.latestRunId;
+      const startedAt = entries[0]?.createdAt ?? (isLatestTaskRun ? task.startedAt : undefined) ?? task.createdAt;
+      const updatedAt =
+        latestEntry?.createdAt ??
+        (isLatestTaskRun ? task.completedAt ?? task.updatedAt : undefined) ??
+        startedAt;
+
+      return {
+        runId,
+        entries,
+        startedAt,
+        updatedAt,
+        status: latestStatusEntry?.status ?? (isLatestTaskRun ? task.status : undefined),
+        reportPath: latestReportEntry?.reportPath,
+        detailCount: entries.length
+      };
+    })
+    .sort((left, right) => {
+      const timeDiff = getSortableTime(right.updatedAt) - getSortableTime(left.updatedAt);
+
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+
+      return (runOrder.get(right.runId) ?? 0) - (runOrder.get(left.runId) ?? 0);
+    });
 }
 
 export function getRunReadiness(input: {

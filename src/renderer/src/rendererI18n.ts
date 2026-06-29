@@ -369,6 +369,7 @@ export const COPY = {
       noSelectedTaskDetail: '从左侧任务列表选择一个任务，或先创建新的测试任务。',
       noTaskLogsTitle: '暂无任务日志',
       noTaskLogsDetail: '创建、输入、测试和报告导出记录会显示在这里。',
+      noTaskRunDetails: '该次运行暂无详细记录。',
       noTasksTitle: '暂无测试任务',
       noTasksDetail: '创建第一个任务后，它会出现在任务列表中。',
       waitingRunTitle: '等待运行',
@@ -438,6 +439,8 @@ export const COPY = {
       notLoaded: '未加载',
       notSelected: '未选择',
       notStarted: '未开始',
+      runRecordCount: (count: number) => `${count} 条详细记录`,
+      runSummary: (runId: string) => `运行 ${runId}`,
       selectedDevice: '所选设备',
       noTask: '未创建任务'
     },
@@ -541,6 +544,7 @@ export const COPY = {
       noSelectedTaskDetail: 'Select a task from the task list or create a new test task first.',
       noTaskLogsTitle: 'No task logs yet',
       noTaskLogsDetail: 'Creation, input, test, and report export records appear here.',
+      noTaskRunDetails: 'No detailed records for this run yet.',
       noTasksTitle: 'No test tasks',
       noTasksDetail: 'Created tasks appear in this list.',
       waitingRunTitle: 'Waiting for a run',
@@ -609,6 +613,8 @@ export const COPY = {
       notLoaded: 'Not loaded',
       notSelected: 'Not selected',
       notStarted: 'not started',
+      runRecordCount: (count: number) => `${count} detail record${count === 1 ? '' : 's'}`,
+      runSummary: (runId: string) => `Run ${runId}`,
       selectedDevice: 'selected device',
       noTask: 'No task created'
     },

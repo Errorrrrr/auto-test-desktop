@@ -733,7 +733,8 @@ h2 {
 .device-list,
 .blocker-list,
 .message-list,
-.task-log-list {
+.task-run-log-list,
+.task-log-detail-list {
   display: grid;
   gap: 10px;
   margin: 0;
@@ -744,7 +745,8 @@ h2 {
 .device-row,
 .blocker-list li,
 .message-row,
-.task-log-list li {
+.task-run-log-details,
+.task-log-detail-list li {
   min-height: 42px;
   padding: 10px 12px;
   border-radius: 8px;
@@ -792,6 +794,60 @@ h2 {
 .device-platform-icon {
   flex: 0 0 auto;
   color: #1f2937;
+}
+
+.task-run-log-details {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.task-run-log-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.task-run-log-summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-run-log-summary-copy {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.task-run-log-summary-copy strong,
+.task-run-log-summary-copy small,
+.task-log-detail-list strong,
+.task-log-detail-list small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.task-log-detail-list {
+  padding: 0 12px 12px;
+}
+
+.task-log-detail-list li {
+  background: #ffffff;
+  border: 1px solid #e0e7f0;
+}
+
+.task-log-detail-list strong,
+.task-log-detail-list small {
+  display: block;
+}
+
+.task-run-log-empty {
+  padding: 0 12px 12px;
 }
 
 .device-row input {

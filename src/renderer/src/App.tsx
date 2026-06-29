@@ -54,6 +54,7 @@ import {
   formatDateTime,
   formatDuration,
   getDeviceInspectionSummary,
+  buildTaskRunLogSummaries,
   formatStatusLabel,
   getErrorMessage,
   getExecutableDevices,
@@ -1021,7 +1022,7 @@ export function TaskWorkspacePanel({
       reasons: [currentTask ? 'Select a connected Android or iOS device.' : 'Create a test task before execution.'],
       ...(selectedDevice ? { selectedDevice } : {})
     };
-  const taskLogs = currentTask?.logs ?? [];
+  const taskRunLogs = buildTaskRunLogSummaries(currentTask);
   const runButtonLabel =
     currentTask && (currentTask.latestRunId || currentTask.runIds?.length) && !isActiveTaskStatus(currentTask.status)
       ? copy.actions.retest
@@ -1346,20 +1347,49 @@ export function TaskWorkspacePanel({
                     <h2>{copy.titles.taskLogs}</h2>
                   </div>
                 </div>
-                {taskLogs.length ? (
-                  <ol className="task-log-list">
-                    {[...taskLogs].reverse().map((entry) => {
-                      const meta = [
-                        formatDateTime(entry.createdAt, language),
-                        entry.status ? formatStatusLabel(entry.status, language) : '',
-                        entry.runId ?? '',
-                        entry.reportPath ?? ''
+                {taskRunLogs.length ? (
+                  <ol className="task-run-log-list" aria-label={copy.titles.taskLogs}>
+                    {taskRunLogs.map((runLog) => {
+                      const summaryMeta = [
+                        formatDateTime(runLog.updatedAt, language),
+                        runLog.status ? formatStatusLabel(runLog.status, language) : '',
+                        copy.runtime.runRecordCount(runLog.detailCount),
+                        runLog.reportPath ?? ''
                       ].filter(Boolean);
 
                       return (
-                        <li key={entry.id}>
-                          <strong>{localizeText(entry.message, language)}</strong>
-                          <small>{meta.join(' / ')}</small>
+                        <li key={runLog.runId} data-task-run-log-id={runLog.runId}>
+                          <details className="task-run-log-details">
+                            <summary className="task-run-log-summary">
+                              <span className="task-run-log-summary-copy">
+                                <strong>{copy.runtime.runSummary(runLog.runId)}</strong>
+                                <small>{summaryMeta.join(' / ')}</small>
+                              </span>
+                              {runLog.status ? (
+                                <StatusPill status={runLog.status} language={language} />
+                              ) : null}
+                            </summary>
+                            {runLog.entries.length ? (
+                              <ol className="task-log-detail-list">
+                                {runLog.entries.map((entry) => {
+                                  const detailMeta = [
+                                    formatDateTime(entry.createdAt, language),
+                                    entry.status ? formatStatusLabel(entry.status, language) : '',
+                                    entry.reportPath ?? ''
+                                  ].filter(Boolean);
+
+                                  return (
+                                    <li key={entry.id}>
+                                      <strong>{localizeText(entry.message, language)}</strong>
+                                      <small>{detailMeta.join(' / ')}</small>
+                                    </li>
+                                  );
+                                })}
+                              </ol>
+                            ) : (
+                              <p className="muted task-run-log-empty">{copy.empty.noTaskRunDetails}</p>
+                            )}
+                          </details>
                         </li>
                       );
                     })}
