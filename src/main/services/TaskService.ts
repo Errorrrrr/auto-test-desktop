@@ -14,6 +14,7 @@ import type {
   TestTaskStatus
 } from '../../shared/types';
 import type { AppDataStorage } from '../storage/AppDataStorage';
+import type { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AppError } from './AppError';
 import { optionalStringField, requireRecord, requireStringField } from './validation';
 import type { ReportService } from './ReportService';
@@ -22,6 +23,7 @@ import type { TestRunService } from './TestRunService';
 
 type TaskServiceOptions = {
   naturalLanguageAppId?: string;
+  modelSettings?: AgentModelSettingsService;
   reports?: ReportService;
   runService?: TestRunService;
   storage: AppDataStorage;
@@ -196,6 +198,7 @@ function clearCurrentRunFields(task: TestTask): TestTask {
 
 export class TaskService {
   private readonly naturalLanguageAppId?: string;
+  private readonly modelSettings?: AgentModelSettingsService;
   private readonly reports?: ReportService;
   private readonly runService?: TestRunService;
   private readonly storage: AppDataStorage;
@@ -203,6 +206,7 @@ export class TaskService {
 
   constructor(options: TaskServiceOptions) {
     this.naturalLanguageAppId = options.naturalLanguageAppId;
+    this.modelSettings = options.modelSettings;
     this.reports = options.reports;
     this.runService = options.runService;
     this.storage = options.storage;
@@ -216,6 +220,7 @@ export class TaskService {
     const workspace = this.storage.getTaskWorkspace(id);
     const now = new Date().toISOString();
     const input = buildInput();
+    const modelSnapshot = await this.requireModelSettings().getEffectiveSnapshot();
     const task: TestTask = {
       id,
       name,
@@ -231,6 +236,7 @@ export class TaskService {
       ],
       reportPaths: [],
       runIds: [],
+      modelSnapshot,
       workspacePath: workspace.rootDir,
       createdAt: now,
       updatedAt: now
@@ -353,7 +359,7 @@ export class TaskService {
       throw new AppError('TASK_INPUT_REQUIRED', EMPTY_INPUT_BLOCKER);
     }
 
-    const taskForRun = task;
+    const taskForRun = await this.ensureTaskModelSnapshot(task);
     const testCase = task.input.testCase;
     const prompt = task.input.naturalLanguage?.prompt;
 
@@ -373,6 +379,7 @@ export class TaskService {
         : {}),
       deviceId,
       prompt,
+      modelSnapshot: taskForRun.modelSnapshot,
       targetAppId: taskForRun.targetAppId ?? this.naturalLanguageAppId
     });
     const {
@@ -501,6 +508,36 @@ export class TaskService {
     return this.testCaseService;
   }
 
+  private requireModelSettings(): AgentModelSettingsService {
+    if (!this.modelSettings) {
+      throw new AppError(
+        'CODEX_MODEL_SETTINGS_NOT_CONFIGURED',
+        'Codex model settings service is not configured.'
+      );
+    }
+
+    return this.modelSettings;
+  }
+
+  private async ensureTaskModelSnapshot(task: TestTask): Promise<TestTask> {
+    if (task.modelSnapshot) {
+      return task;
+    }
+
+    const modelSnapshot = await this.requireModelSettings().getEffectiveSnapshot();
+    const nextTask = appendTaskLog({
+      ...task,
+      modelSnapshot,
+      updatedAt: new Date().toISOString()
+    }, 'model_snapshot_captured', `Codex model ${modelSnapshot.modelName} captured for task execution.`, {
+      status: task.status
+    });
+
+    await this.persistTask(nextTask);
+
+    return nextTask;
+  }
+
   private async syncTaskWithLatestRun(task: TestTask): Promise<TestTask> {
     if (!task.latestRunId || !this.runService) {
       return task;
@@ -519,6 +556,7 @@ export class TaskService {
     let nextTask: TestTask = {
       ...task,
       deviceSnapshot: task.deviceSnapshot ?? getDeviceSnapshot(run),
+      modelSnapshot: task.modelSnapshot ?? run.modelSnapshot,
       runIds: addUniqueValue(task.runIds, run.id),
       status: nextStatus,
       updatedAt: run.updatedAt,

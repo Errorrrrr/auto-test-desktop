@@ -5,8 +5,15 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import type { DeviceInfo, TaskReport, TestTask } from '../../shared/types';
-import { App, DeviceListPanel, ReportPanel, TaskWorkspacePanel, openAllowedViewerUrl } from './App';
+import type { CodexModelSettingsResponse, DeviceInfo, TaskReport, TestTask } from '../../shared/types';
+import {
+  App,
+  DeviceListPanel,
+  ModelSettingsPanel,
+  ReportPanel,
+  TaskWorkspacePanel,
+  openAllowedViewerUrl
+} from './App';
 
 const rendererStyles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
@@ -31,6 +38,34 @@ function createTask(overrides: Partial<TestTask> = {}): TestTask {
     ...overrides
   };
 }
+
+const modelSettings: CodexModelSettingsResponse = {
+  defaultModelName: 'gpt-5',
+  effective: {
+    capturedAt: '2026-06-29T07:00:00Z',
+    modelName: 'gpt-5',
+    presetId: 'gpt-5',
+    source: 'preset'
+  },
+  presets: [
+    {
+      id: 'gpt-5',
+      label: 'GPT-5',
+      modelName: 'gpt-5'
+    },
+    {
+      id: 'gpt-5-mini',
+      label: 'GPT-5 mini',
+      modelName: 'gpt-5-mini'
+    }
+  ],
+  settings: {
+    modelName: 'gpt-5',
+    presetId: 'gpt-5',
+    source: 'preset',
+    updatedAt: '2026-06-29T06:00:00Z'
+  }
+};
 
 describe('viewer open action', () => {
   it('opens only local viewer URLs from the renderer', () => {
@@ -116,7 +151,7 @@ describe('app shell scrolling', () => {
     }
   });
 
-  it('renders the durable left navigation as dashboard, task list, device management, and viewer only', () => {
+  it('renders the durable left navigation as dashboard, task list, device management, viewer, and settings', () => {
     vi.stubGlobal('window', { appAutoTest: undefined });
 
     try {
@@ -126,9 +161,11 @@ describe('app shell scrolling', () => {
       expect(html).toContain('data-target-page="task"');
       expect(html).toContain('data-target-page="devices"');
       expect(html).toContain('data-target-page="viewer"');
+      expect(html).toContain('data-target-page="settings"');
       expect(html).toContain('仪表盘');
       expect(html).toContain('测试任务');
       expect(html).toContain('设备管理');
+      expect(html).toContain('设置');
       expect(html).not.toContain('aria-label="测试流程"');
       expect(html).not.toContain('data-target-page="input"');
       expect(html).not.toContain('data-target-page="run"');
@@ -136,6 +173,60 @@ describe('app shell scrolling', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('renders Codex model settings from the strict response contract', () => {
+    const settings: CodexModelSettingsResponse = {
+      defaultModelName: 'gpt-5',
+      settings: {
+        modelName: 'gpt-5-mini',
+        source: 'preset',
+        presetId: 'gpt-5-mini',
+        updatedAt: '2026-06-29T08:00:00.000Z'
+      },
+      effective: {
+        modelName: 'gpt-5-mini',
+        source: 'preset',
+        presetId: 'gpt-5-mini',
+        capturedAt: '2026-06-29T08:01:00.000Z',
+        settingsUpdatedAt: '2026-06-29T08:00:00.000Z'
+      },
+      presets: [
+        {
+          id: 'gpt-5',
+          label: 'GPT-5',
+          modelName: 'gpt-5',
+          recommended: true
+        },
+        {
+          id: 'gpt-5-mini',
+          label: 'GPT-5 mini',
+          modelName: 'gpt-5-mini'
+        }
+      ]
+    };
+
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="gpt-5-mini"
+        draftPresetId="gpt-5-mini"
+        language="en"
+        modelSettings={settings}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'idle',
+          detail: ''
+        }}
+      />
+    );
+
+    expect(html).toContain('data-page="settings"');
+    expect(html).toContain('Codex Model Settings');
+    expect(html).toContain('gpt-5-mini (GPT-5 mini)');
+    expect(html).toContain('app default (gpt-5)');
+    expect(html).toContain('GPT-5 mini (gpt-5-mini)');
   });
 
   it('keeps the default home page as a dashboard instead of a workflow menu page', () => {
@@ -178,6 +269,32 @@ describe('app shell scrolling', () => {
 });
 
 describe('workbench panels', () => {
+  it('renders the Codex model settings panel with presets and save state', () => {
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="gpt-5-mini"
+        draftPresetId="gpt-5-mini"
+        language="en"
+        modelSettings={modelSettings}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'success',
+          detail: 'Codex model settings saved. New tasks will use the selected model.'
+        }}
+      />
+    );
+
+    expect(html).toContain('data-page="settings"');
+    expect(html).toContain('Codex Model Settings');
+    expect(html).toContain('Saved models apply only to new tasks');
+    expect(html).toContain('app default (gpt-5)');
+    expect(html).toContain('GPT-5 mini (gpt-5-mini)');
+    expect(html).toContain('value="gpt-5-mini" selected=""');
+    expect(html).toContain('Codex model settings saved');
+  });
+
   it('renders the task menu as a list plus selected detail workspace', () => {
     const olderTask = createTask({
       id: 'task-login',
@@ -202,7 +319,13 @@ describe('workbench panels', () => {
       },
       workspacePath: '/tmp/task-checkout',
       createdAt: '2026-06-25T03:00:00.000Z',
-      updatedAt: '2026-06-25T03:00:00.000Z'
+      updatedAt: '2026-06-25T03:00:00.000Z',
+      modelSnapshot: {
+        modelName: 'gpt-5-mini',
+        source: 'preset',
+        presetId: 'gpt-5-mini',
+        capturedAt: '2026-06-25T03:00:00.000Z'
+      }
     });
 
     const html = renderToStaticMarkup(
@@ -233,6 +356,8 @@ describe('workbench panels', () => {
     expect(html).toContain('data-task-detail-section="logs"');
     expect(html).toContain('data-task-detail-section="report"');
     expect(html).toContain('Target App ID');
+    expect(html).toContain('Codex model');
+    expect(html).toContain('gpt-5-mini (GPT-5 mini)');
     expect(html).toContain('data-task-id="task-login"');
     expect(html).toContain('data-task-id="task-checkout"');
     expect(html).toContain('Checkout regression');
@@ -244,6 +369,42 @@ describe('workbench panels', () => {
     expect(html).not.toContain('data-page-link="report"');
     expect(html).not.toContain('run-login');
     expect(html).not.toContain('Pixel 8');
+  });
+
+  it('shows the task model snapshot and warns when global settings changed', () => {
+    const selectedTask = createTask({
+      id: 'task-old-model',
+      name: 'Old model task',
+      modelSnapshot: {
+        capturedAt: '2026-06-29T07:00:00Z',
+        modelName: 'gpt-5-mini',
+        presetId: 'gpt-5-mini',
+        source: 'preset'
+      }
+    });
+
+    const html = renderToStaticMarkup(
+      <TaskWorkspacePanel
+        currentTask={selectedTask}
+        language="en"
+        modelSettings={modelSettings}
+        onCreateTask={() => undefined}
+        onSelectTask={() => undefined}
+        onTaskDescriptionChange={() => undefined}
+        onTaskNameChange={() => undefined}
+        taskAction={{
+          status: 'success',
+          detail: 'Task task-old-model is ready.'
+        }}
+        taskDescription=""
+        taskName=""
+        tasks={[selectedTask]}
+      />
+    );
+
+    expect(html).toContain('Codex model');
+    expect(html).toContain('gpt-5-mini (GPT-5 mini)');
+    expect(html).toContain('This task keeps gpt-5-mini. New model settings apply only to new tasks.');
   });
 
   it('renders task logs as per-run summaries with expandable details', () => {
@@ -452,6 +613,16 @@ describe('workbench panels', () => {
     expect(appSource).not.toContain('const RUN_STATUS_MAX_POLLS = 120;');
   });
 
+  it('keeps renderer model settings on the strict shared/preload response contract', () => {
+    expect(appSource).toContain('CodexModelSettingsResponse');
+    expect(appSource).toContain('api.agent.getModelSettings()');
+    expect(appSource).toContain('api.agent.saveModelSettings');
+    expect(appSource).toContain('modelSettings');
+    expect(appSource).not.toContain('CodexModelSettingsState');
+    expect(appSource).not.toContain("source: 'legacy'");
+    expect(appSource).not.toContain("source: 'env'");
+  });
+
   it('renders disconnected devices as disabled execution targets', () => {
     const devices: DeviceInfo[] = [
       {
@@ -603,6 +774,7 @@ describe('workbench panels', () => {
       endedAt: '2026-06-12T06:00:03Z',
       conclusion: 'Failed',
       failureReason: 'Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro',
+      modelSummary: 'gpt-5 (app default)',
       artifacts: [],
       markdown:
         '# Smoke report\n\n- Status: failed\n- Failure reason: Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro'
@@ -622,6 +794,7 @@ describe('workbench panels', () => {
     expect(html).toContain('Smoke report');
     expect(html).toContain('Pixel 8');
     expect(html).toContain('smoke.yaml');
+    expect(html).toContain('gpt-5 (app default)');
     expect(html).not.toContain('secret-token');
     expect(html).not.toContain('/Users/alice');
     expect(html).toContain('Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro');
@@ -640,6 +813,7 @@ describe('workbench panels', () => {
       endedAt: '2026-06-12T06:00:03Z',
       conclusion: 'Failed',
       failureReason: 'Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro',
+      modelSummary: 'gpt-5 (app default)',
       artifacts: [],
       markdown:
         '# Smoke report\n\n- Prompt: token=[REDACTED] from /Users/[REDACTED]/.maestro\n- Failure reason: Authorization: [REDACTED] failed for /Users/[REDACTED]/.maestro\n- Fallback: api_key=[REDACTED] at /Users/[REDACTED]/.maestro'

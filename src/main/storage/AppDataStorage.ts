@@ -76,6 +76,7 @@ export class AppDataStorage {
   readonly rootDir: string;
   readonly reportsDir: string;
   readonly runsDir: string;
+  readonly settingsDir: string;
   readonly tasksDir: string;
   readonly testCasesDir: string;
 
@@ -84,6 +85,7 @@ export class AppDataStorage {
     this.testCasesDir = join(rootDir, 'testcases');
     this.runsDir = join(rootDir, 'runs');
     this.reportsDir = join(rootDir, 'reports');
+    this.settingsDir = join(rootDir, 'settings');
     this.tasksDir = join(rootDir, 'tasks');
   }
 
@@ -92,6 +94,7 @@ export class AppDataStorage {
       mkdir(this.testCasesDir, { recursive: true }),
       mkdir(this.runsDir, { recursive: true }),
       mkdir(this.reportsDir, { recursive: true }),
+      mkdir(this.settingsDir, { recursive: true }),
       mkdir(this.tasksDir, { recursive: true })
     ]);
   }
@@ -120,5 +123,9 @@ export class AppDataStorage {
 
   getReportPath(runId: string): string {
     return join(this.reportsDir, `${runId}.md`);
+  }
+
+  getCodexModelSettingsPath(): string {
+    return join(this.settingsDir, 'codex-model.json');
   }
 }

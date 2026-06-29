@@ -22,6 +22,7 @@ import type {
   ServiceHealth,
   TestRunStatus
 } from '../../shared/types';
+import { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { ReportService } from './ReportService';
@@ -123,6 +124,7 @@ class TaskMaestroProvider implements MaestroProvider {
 
 async function createTaskServices(options: { naturalLanguageAppId?: string } = {}): Promise<{
   agentProvider: TaskAgentProvider;
+  modelSettings: AgentModelSettingsService;
   provider: TaskMaestroProvider;
   rootDir: string;
   storage: AppDataStorage;
@@ -132,7 +134,8 @@ async function createTaskServices(options: { naturalLanguageAppId?: string } = {
   const storage = new AppDataStorage(join(rootDir, 'data'));
   const provider = new TaskMaestroProvider();
   const agentProvider = new TaskAgentProvider();
-  const agent = new AgentSessionService(agentProvider);
+  const modelSettings = new AgentModelSettingsService({ storage });
+  const agent = new AgentSessionService(agentProvider, { modelSettings });
   const devices = new DeviceService({ provider });
   const cases = new TestCaseService({
     maxUploadSizeBytes: 1024 * 1024,
@@ -154,10 +157,12 @@ async function createTaskServices(options: { naturalLanguageAppId?: string } = {
 
   return {
     agentProvider,
+    modelSettings,
     provider,
     rootDir,
     storage,
     tasks: new TaskService({
+      modelSettings,
       naturalLanguageAppId:
         'naturalLanguageAppId' in options ? options.naturalLanguageAppId : 'com.example.app',
       reports,
@@ -193,6 +198,79 @@ afterEach(async () => {
 });
 
 describe('TaskService', () => {
+  it('captures the effective Codex model when a task is created', async () => {
+    const { tasks } = await createTaskServices();
+    const task = await tasks.create({ name: 'Model task' });
+
+    expect(task.modelSnapshot).toMatchObject({
+      modelName: 'gpt-5',
+      source: 'app_default'
+    });
+  });
+
+  it('keeps an existing task model snapshot when global settings change later', async () => {
+    const { agentProvider, modelSettings, tasks } = await createTaskServices();
+    const task = await tasks.create({ name: 'Stable model task' });
+
+    await modelSettings.saveModelSettings({
+      modelName: 'gpt-5-mini',
+      source: 'preset',
+      presetId: 'gpt-5-mini'
+    });
+    await tasks.updateInput({
+      taskId: task.id,
+      prompt: '点击 登录'
+    });
+    const queuedTask = await tasks.start({
+      taskId: task.id,
+      deviceId: connectedDevice.id
+    });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
+
+    expect(queuedTask.modelSnapshot).toMatchObject({
+      modelName: 'gpt-5',
+      source: 'app_default'
+    });
+    expect(agentProvider.runTestRequests[0]?.modelSnapshot).toMatchObject({
+      modelName: 'gpt-5',
+      source: 'app_default'
+    });
+  });
+
+  it('backfills a model snapshot before starting a legacy task', async () => {
+    const { agentProvider, storage, tasks } = await createTaskServices();
+    const task = await tasks.create({ name: 'Legacy task' });
+    const legacyTask = { ...task };
+
+    delete legacyTask.modelSnapshot;
+
+    await storage.getTaskStore().upsert(legacyTask);
+    await tasks.updateInput({
+      taskId: task.id,
+      prompt: '点击 登录'
+    });
+    const queuedTask = await tasks.start({
+      taskId: task.id,
+      deviceId: connectedDevice.id
+    });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
+
+    expect(queuedTask.modelSnapshot).toMatchObject({
+      modelName: 'gpt-5',
+      source: 'app_default'
+    });
+    expect(queuedTask.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'model_snapshot_captured'
+        })
+      ])
+    );
+    expect(agentProvider.runTestRequests[0]?.modelSnapshot).toMatchObject({
+      modelName: 'gpt-5'
+    });
+  });
+
   it('lists the most recently updated task first after two task refresh records exist', async () => {
     const { storage, tasks } = await createTaskServices();
     const olderTask = await tasks.create({ name: 'Older task' });
@@ -313,6 +391,10 @@ describe('TaskService', () => {
       device: expect.objectContaining({
         id: connectedDevice.id
       }),
+      modelSnapshot: expect.objectContaining({
+        modelName: 'gpt-5',
+        source: 'app_default'
+      }),
       timeoutMs: 1_500
     });
     expect(completedTask).toMatchObject({
@@ -408,6 +490,7 @@ describe('TaskService', () => {
       taskId: task.id,
       deviceId: connectedDevice.id
     });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
 
     expect(queuedTask.status).toBe('queued');
     expect(agentProvider.runTestRequests[0]).toMatchObject({
@@ -429,6 +512,7 @@ describe('TaskService', () => {
       taskId: task.id,
       deviceId: connectedDevice.id
     });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
 
     expect(agentProvider.runTestRequests[0]).toMatchObject({
       prompt: '点击 登录',
@@ -449,6 +533,7 @@ describe('TaskService', () => {
       deviceId: connectedDevice.id,
       targetAppId: 'com.example.start'
     });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
 
     expect(agentProvider.runTestRequests[0]).toMatchObject({
       prompt: '点击 登录',
@@ -477,6 +562,7 @@ describe('TaskService', () => {
       conclusion: 'Succeeded',
       inputMode: 'test_case',
       inputSummary: expect.stringContaining('Smoke flow'),
+      modelSummary: 'gpt-5 (app default)',
       targetDevice: expect.stringContaining('Pixel 8'),
       filePath: expect.stringContaining(`/tasks/${task.id}/reports/`)
     });
@@ -486,6 +572,7 @@ describe('TaskService', () => {
     expect(markdown).toContain(`- Task: ${task.id}`);
     expect(markdown).toContain(`- Run: ${completedTask.latestRunId}`);
     expect(markdown).toContain('- Input mode: test_case');
+    expect(markdown).toContain('- Codex model: gpt-5 (app default)');
     expect(markdown).toContain('- Conclusion: Succeeded');
 
     const taskWithReportLog = await tasks.get({ taskId: task.id });

@@ -2,9 +2,12 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { DEFAULT_CODEX_MODEL_NAME } from '../../shared/codexModels';
+
 export type MaestroProviderMode = 'cli' | 'mcp' | 'disabled';
 
 export interface RuntimeEnv {
+  AGENT_CODEX_MODEL?: string;
   ADB_PATH?: string;
   AGENT_CODEX_SERVICE_TIER?: string;
   APP_AUTO_TEST_DATA_DIR?: string;
@@ -24,6 +27,7 @@ export interface RuntimeEnv {
 
 export interface RuntimeConfig {
   adbPath: string;
+  agentCodexModelName: string;
   agentCodexServiceTier: 'fast' | 'flex';
   agentCommand?: string;
   agentProvider: string;
@@ -95,6 +99,7 @@ export function createRuntimeConfig(
 
   return {
     adbPath: env.ADB_PATH?.trim() || resolveAndroidSdkToolPath(env, ['platform-tools', 'adb'], 'adb'),
+    agentCodexModelName: env.AGENT_CODEX_MODEL?.trim() || DEFAULT_CODEX_MODEL_NAME,
     agentCodexServiceTier: parseCodexServiceTier(env.AGENT_CODEX_SERVICE_TIER),
     agentProvider: env.AGENT_PROVIDER?.trim() || 'codex',
     agentCommand: env.AGENT_COMMAND?.trim() || ((env.AGENT_PROVIDER?.trim() || 'codex') === 'codex' ? 'codex' : undefined),

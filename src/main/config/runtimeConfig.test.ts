@@ -45,4 +45,9 @@ describe('runtime config', () => {
     expect(createRuntimeConfig({ AGENT_CODEX_SERVICE_TIER: ' flex ' }).agentCodexServiceTier).toBe('flex');
     expect(createRuntimeConfig({ AGENT_CODEX_SERVICE_TIER: ' default ' }).agentCodexServiceTier).toBe('fast');
   });
+
+  it('uses a single Codex model default with an environment override', () => {
+    expect(createRuntimeConfig({}).agentCodexModelName).toBe('gpt-5');
+    expect(createRuntimeConfig({ AGENT_CODEX_MODEL: ' gpt-5-mini ' }).agentCodexModelName).toBe('gpt-5-mini');
+  });
 });

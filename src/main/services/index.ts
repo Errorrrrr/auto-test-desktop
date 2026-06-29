@@ -6,6 +6,7 @@ import type { MaestroProvider } from '../adapters/maestro/MaestroProvider';
 import { StaticMaestroProvider } from '../adapters/maestro/MaestroProvider';
 import { createRuntimeConfig, type RuntimeEnv } from '../config/runtimeConfig';
 import { AppDataStorage } from '../storage/AppDataStorage';
+import { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { EnvironmentService } from './EnvironmentService';
@@ -20,6 +21,7 @@ export interface AppAutoTestServices {
   cases: TestCaseService;
   devices: DeviceService;
   env: EnvironmentService;
+  modelSettings: AgentModelSettingsService;
   reports: ReportService;
   runs: TestRunService;
   tasks: TaskService;
@@ -35,6 +37,10 @@ export function createDefaultServices(options: {
 }): AppAutoTestServices {
   const config = createRuntimeConfig(options.env, { dataRoot: options.dataRoot });
   const storage = new AppDataStorage(config.dataRoot);
+  const modelSettings = new AgentModelSettingsService({
+    defaultModelName: config.agentCodexModelName,
+    storage
+  });
   const maestroProvider =
     options.maestroProvider ??
     (options.devices
@@ -74,7 +80,9 @@ export function createDefaultServices(options: {
       };
     }
   });
-  const agent = new AgentSessionService(agentProvider);
+  const agent = new AgentSessionService(agentProvider, {
+    modelSettings
+  });
   const cases = new TestCaseService({
     maxUploadSizeBytes: config.maxUploadSizeBytes,
     storage
@@ -91,6 +99,7 @@ export function createDefaultServices(options: {
     testRunService: runs
   });
   const tasks = new TaskService({
+    modelSettings,
     naturalLanguageAppId: config.maestroAppId,
     reports,
     runService: runs,
@@ -108,6 +117,7 @@ export function createDefaultServices(options: {
     cases,
     devices,
     env,
+    modelSettings,
     reports,
     runs,
     tasks,

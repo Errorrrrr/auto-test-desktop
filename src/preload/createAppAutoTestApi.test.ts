@@ -54,6 +54,13 @@ describe('preload appAutoTest API', () => {
     await api.tasks.delete('task-1');
     await api.tasks.getReport('task-1');
     await api.tasks.exportReport({ taskId: 'task-1', format: 'markdown' });
+    await api.agent.createSession();
+    await api.agent.getModelSettings();
+    await api.agent.saveModelSettings({
+      modelName: 'gpt-5-mini',
+      source: 'preset',
+      presetId: 'gpt-5-mini'
+    });
     await api.agent.sendMessage({ sessionId: 'session-1', content: 'Run smoke flow' });
 
     expect(calls).toEqual([
@@ -122,6 +129,22 @@ describe('preload appAutoTest API', () => {
       {
         channel: IPC_CHANNELS.tasks.exportReport,
         payload: { taskId: 'task-1', format: 'markdown' }
+      },
+      {
+        channel: IPC_CHANNELS.agent.createSession,
+        payload: undefined
+      },
+      {
+        channel: IPC_CHANNELS.agent.getModelSettings,
+        payload: undefined
+      },
+      {
+        channel: IPC_CHANNELS.agent.saveModelSettings,
+        payload: {
+          modelName: 'gpt-5-mini',
+          source: 'preset',
+          presetId: 'gpt-5-mini'
+        }
       },
       {
         channel: IPC_CHANNELS.agent.sendMessage,

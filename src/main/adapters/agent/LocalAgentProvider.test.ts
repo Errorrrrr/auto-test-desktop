@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type { ExecFile } from '../exec';
 import { LocalAgentProvider } from './LocalAgentProvider';
 
+const modelSnapshot = {
+  modelName: 'gpt-5',
+  source: 'app_default' as const,
+  capturedAt: '2026-06-29T07:30:00Z'
+};
+
 describe('LocalAgentProvider', () => {
   it('blocks manual-ready mode because task execution requires Codex', async () => {
     const provider = new LocalAgentProvider({ provider: 'manual-ready' });
@@ -67,6 +73,7 @@ describe('LocalAgentProvider', () => {
           type: 'emulator',
           connected: true
         },
+        modelSnapshot,
         prompt: '点击登录',
         targetAppId: 'com.example.app',
         timeoutMs: 1000
@@ -83,6 +90,8 @@ describe('LocalAgentProvider', () => {
         'mcp_servers.maestro.command="maestro"',
         'mcp_servers.maestro.args=["mcp"]',
         'exec',
+        '-m',
+        'gpt-5',
         '--ignore-user-config',
         '--sandbox',
         'workspace-write',
@@ -127,6 +136,7 @@ describe('LocalAgentProvider', () => {
           type: 'emulator',
           connected: true
         },
+        modelSnapshot,
         prompt: '进入我的页面',
         timeoutMs: 1000
       })
@@ -137,6 +147,40 @@ describe('LocalAgentProvider', () => {
     expect(calls[0]?.args).toEqual(
       expect.arrayContaining(['mcp_servers.maestro.command="/opt/homebrew/bin/maestro"'])
     );
+  });
+
+  it('does not fall back to the Codex CLI default model when no model snapshot is supplied', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const execFile: ExecFile = async (file, args) => {
+      calls.push({ file, args });
+
+      return {
+        stdout: 'TEST_RESULT: passed',
+        stderr: ''
+      };
+    };
+    const provider = new LocalAgentProvider({
+      command: 'codex',
+      execFile,
+      provider: 'codex'
+    });
+
+    await expect(
+      provider.runTest({
+        device: {
+          id: 'emulator-5554',
+          name: 'Pixel',
+          platform: 'android',
+          type: 'emulator',
+          connected: true
+        },
+        prompt: '进入我的页面'
+      } as Parameters<LocalAgentProvider['runTest']>[0])
+    ).resolves.toMatchObject({
+      status: 'failed',
+      failureReason: expect.stringContaining('model snapshot')
+    });
+    expect(calls).toEqual([]);
   });
 
   it('fails Codex runs that report passed without execution evidence', async () => {
@@ -159,6 +203,7 @@ describe('LocalAgentProvider', () => {
           type: 'emulator',
           connected: true
         },
+        modelSnapshot,
         prompt: '点击登录并确认进入首页',
         timeoutMs: 1000
       })
@@ -189,6 +234,7 @@ describe('LocalAgentProvider', () => {
           type: 'emulator',
           connected: true
         },
+        modelSnapshot,
         prompt: '点击登录并确认进入首页',
         timeoutMs: 1000
       })
@@ -218,6 +264,7 @@ describe('LocalAgentProvider', () => {
           type: 'emulator',
           connected: true
         },
+        modelSnapshot,
         prompt: '进入我的页面',
         timeoutMs: 1000
       })

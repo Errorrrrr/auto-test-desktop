@@ -18,6 +18,7 @@ import type {
   ServiceHealth,
   TestCaseManifest
 } from '../../shared/types';
+import { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { ReportService } from './ReportService';
@@ -126,7 +127,8 @@ async function createRunAndReportServices(): Promise<{
   const devices = new DeviceService({
     provider: new SucceedingMaestroProvider()
   });
-  const agent = new AgentSessionService(testAgentProvider);
+  const modelSettings = new AgentModelSettingsService({ storage });
+  const agent = new AgentSessionService(testAgentProvider, { modelSettings });
 
   await storage.getTestCaseStore().upsert(importedCase);
 
@@ -196,7 +198,11 @@ describe('ReportService', () => {
       prompt: 'Run smoke',
       status: 'succeeded',
       targetDevice: expect.stringContaining('iPhone 16'),
-      testCase: expect.stringContaining('smoke.yaml')
+      testCase: expect.stringContaining('smoke.yaml'),
+      modelSummary: 'gpt-5 (app default)',
+      modelSnapshot: expect.objectContaining({
+        modelName: 'gpt-5'
+      })
     });
     expect(report.filePath).toBe(storage.getReportPath(run.id));
     const markdown = await readFile(report.filePath ?? '', 'utf8');
@@ -204,6 +210,7 @@ describe('ReportService', () => {
     expect(markdown).toContain(`- Run: ${run.id}`);
     expect(markdown).toContain('- Target device: iPhone 16');
     expect(markdown).toContain('- Test case: smoke.yaml');
+    expect(markdown).toContain('- Codex model: gpt-5 (app default)');
     expect(markdown).toContain('- Agent instruction: Run smoke');
     expect(markdown).toContain('- Started:');
     expect(markdown).toContain('- Ended:');
@@ -250,5 +257,6 @@ describe('ReportService', () => {
     expect(markdown).toContain('api_key=[REDACTED]');
     expect(markdown).toContain('[REDACTED_SECRET]');
     expect(markdown).toContain('C:\\Users\\[REDACTED]\\project');
+    expect(markdown).toContain('- Codex model: Not recorded (legacy run)');
   });
 });

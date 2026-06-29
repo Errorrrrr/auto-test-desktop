@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { DeviceInfo, ServiceHealth, TestCaseManifest, TestRun } from '../../shared/types';
+import type {
+  CodexModelSnapshot,
+  DeviceInfo,
+  ServiceHealth,
+  TestCaseManifest,
+  TestRun
+} from '../../shared/types';
 import type { FileManifestStore } from '../storage/FileManifestStore';
 import type { AgentSessionService } from './AgentSessionService';
 import { AppError } from './AppError';
@@ -21,6 +27,7 @@ export interface TaskRunStartRequest {
   caseName?: string;
   deviceId: string;
   flowPath?: string;
+  modelSnapshot?: CodexModelSnapshot;
   prompt?: string;
   targetAppId?: string;
 }
@@ -83,9 +90,10 @@ export class TestRunService {
     const caseId = requireStringField(request, 'caseId');
     const deviceId = requireStringField(request, 'deviceId');
     const prompt = requireStringField(request, 'prompt');
-    const [agentHealth, maestroHealth] = await Promise.all([
+    const [agentHealth, maestroHealth, modelSnapshot] = await Promise.all([
       this.agentService.getHealth(),
-      this.deviceService.getHealth()
+      this.deviceService.getHealth(),
+      this.agentService.captureModelSnapshot()
     ]);
 
     if (!isUsableAgentStatus(agentHealth.status)) {
@@ -125,6 +133,7 @@ export class TestRunService {
       devicePlatform: device.platform,
       deviceType: device.type,
       prompt,
+      modelSnapshot,
       status: 'queued',
       createdAt: now,
       updatedAt: now
@@ -139,10 +148,13 @@ export class TestRunService {
   }
 
   async startForTask(request: TaskRunStartRequest): Promise<TestRun> {
-    const [agentHealth, maestroHealth, devices] = await Promise.all([
+    const [agentHealth, maestroHealth, devices, modelSnapshot] = await Promise.all([
       this.agentService.getHealth(),
       this.deviceService.getHealth(),
-      this.deviceService.listDevices()
+      this.deviceService.listDevices(),
+      request.modelSnapshot
+        ? Promise.resolve(request.modelSnapshot)
+        : this.agentService.captureModelSnapshot()
     ]);
 
     if (!isUsableAgentStatus(agentHealth.status)) {
@@ -179,6 +191,7 @@ export class TestRunService {
       devicePlatform: device.platform,
       deviceType: device.type,
       prompt: request.prompt ?? '',
+      modelSnapshot,
       status: 'queued',
       createdAt: now,
       updatedAt: now
@@ -271,6 +284,13 @@ export class TestRunService {
         status: 'running'
       });
 
+      if (!running.modelSnapshot) {
+        throw new AppError(
+          'CODEX_MODEL_SNAPSHOT_REQUIRED',
+          'Run is missing a Codex model snapshot.'
+        );
+      }
+
       if (this.cancelledRunIds.has(runId)) {
         return;
       }
@@ -291,6 +311,7 @@ export class TestRunService {
           connected: true
         },
         prompt: running.prompt,
+        modelSnapshot: running.modelSnapshot,
         signal: abortController.signal,
         targetAppId: options.targetAppId,
         taskId: running.taskId,

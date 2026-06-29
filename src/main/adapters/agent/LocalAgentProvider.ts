@@ -111,6 +111,15 @@ export class LocalAgentProvider implements AgentProvider {
       };
     }
 
+    if (!request.modelSnapshot?.modelName) {
+      return {
+        status: 'failed',
+        stdout: '',
+        stderr: '',
+        failureReason: 'Codex model snapshot is required before task execution.'
+      };
+    }
+
     const prompt = buildCodexExecutionPrompt(request);
     const args = [
       '-c',
@@ -124,6 +133,8 @@ export class LocalAgentProvider implements AgentProvider {
       '--ask-for-approval',
       'never',
       'exec',
+      '-m',
+      request.modelSnapshot.modelName,
       '--ignore-user-config',
       '--cd',
       process.cwd(),

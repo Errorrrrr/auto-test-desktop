@@ -23,6 +23,7 @@ import type {
   TestCaseManifest,
   TestRunStatus
 } from '../../shared/types';
+import { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AgentSessionService } from './AgentSessionService';
 import { DeviceService } from './DeviceService';
 import { TestRunService } from './TestRunService';
@@ -215,7 +216,8 @@ async function createRunService(options: {
     runResult: options.runResult,
     runTest: options.runTest
   });
-  const agentService = new AgentSessionService(agentProvider);
+  const modelSettings = new AgentModelSettingsService({ storage });
+  const agentService = new AgentSessionService(agentProvider, { modelSettings });
   const deviceService = new DeviceService({ provider });
 
   tempRoots.push(rootDir);
@@ -280,17 +282,27 @@ describe('TestRunService', () => {
       device: expect.objectContaining({
         id: connectedDevice.id
       }),
+      modelSnapshot: expect.objectContaining({
+        modelName: 'gpt-5',
+        source: 'app_default'
+      }),
       timeoutMs: 1_234
     });
     expect(agentProvider.runTestRequests[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(finalRun).toMatchObject({
       caseName: importedCase.name,
       deviceName: connectedDevice.name,
+      modelSnapshot: expect.objectContaining({
+        modelName: 'gpt-5'
+      }),
       status: 'succeeded',
       stdout: 'codex test passed'
     });
     await expect(storage.getRunStore().get(run.id)).resolves.toMatchObject({
       id: run.id,
+      modelSnapshot: expect.objectContaining({
+        modelName: 'gpt-5'
+      }),
       status: 'succeeded'
     });
   });

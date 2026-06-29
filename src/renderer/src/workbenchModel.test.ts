@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  CodexModelSettingsResponse,
   DeviceInfo,
   DeviceStartResult,
   DeviceStopResult,
@@ -15,11 +16,13 @@ import {
   buildTaskRunLogSummaries,
   createReportPlaceholder,
   formatStatusLabel,
+  formatCodexModelSnapshot,
   getCurrentTaskAfterRefresh,
   getDeviceInspectionSummary,
   getPreferredDeviceId,
   getRunActionStatusForTaskStatus,
   getRunReadiness,
+  getTaskModelChangeNotice,
   getSelectedTaskAfterRefresh,
   hasStartedDeviceAppeared,
   isStartableDevice,
@@ -84,6 +87,34 @@ const importedCase: TestCaseManifest = {
   importedAt: '2026-06-12T06:00:00Z',
   status: 'imported',
   validationMessages: []
+};
+
+const modelSettings: CodexModelSettingsResponse = {
+  defaultModelName: 'gpt-5',
+  effective: {
+    capturedAt: '2026-06-29T07:00:00Z',
+    modelName: 'gpt-5',
+    presetId: 'gpt-5',
+    source: 'preset'
+  },
+  presets: [
+    {
+      id: 'gpt-5',
+      label: 'GPT-5',
+      modelName: 'gpt-5'
+    },
+    {
+      id: 'gpt-5-mini',
+      label: 'GPT-5 mini',
+      modelName: 'gpt-5-mini'
+    }
+  ],
+  settings: {
+    modelName: 'gpt-5',
+    presetId: 'gpt-5',
+    source: 'preset',
+    updatedAt: '2026-06-29T06:00:00Z'
+  }
 };
 
 function createTask(overrides: Partial<TestTask> = {}): TestTask {
@@ -162,6 +193,41 @@ describe('workbench run readiness', () => {
     expect(readiness.canStart).toBe(false);
     expect(readiness.reasons).toContain('Create a test task before execution.');
     expect(readiness.inputMode).toBe('natural_language');
+  });
+
+  it('blocks new task execution while model settings are loading', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      modelSettings: null,
+      selectedDeviceId: connectedDevice.id,
+      task: createTask(),
+      prompt: 'Run smoke'
+    });
+
+    expect(readiness.canStart).toBe(false);
+    expect(readiness.reasons).toContain('Codex model settings are still loading.');
+  });
+
+  it('allows a task with its own model snapshot while global model settings are loading', () => {
+    const readiness = getRunReadiness({
+      environment: createEnvironment(),
+      devices: [connectedDevice],
+      modelSettings: null,
+      selectedDeviceId: connectedDevice.id,
+      task: createTask({
+        modelSnapshot: {
+          capturedAt: '2026-06-29T07:00:00Z',
+          modelName: 'gpt-5',
+          presetId: 'gpt-5',
+          source: 'preset'
+        }
+      }),
+      prompt: ''
+    });
+
+    expect(readiness.canStart).toBe(true);
+    expect(readiness.reasons).toEqual([]);
   });
 
   it('blocks runs when no connected Android or iOS device is selected', () => {
@@ -290,6 +356,23 @@ describe('workbench run readiness', () => {
 
     expect(readiness.canStart).toBe(true);
     expect(readiness.reasons).toEqual([]);
+  });
+});
+
+describe('workbench model snapshots', () => {
+  it('formats model snapshots and warns when the active setting has changed', () => {
+    const snapshot = {
+      capturedAt: '2026-06-29T07:00:00Z',
+      modelName: 'gpt-5-mini',
+      presetId: 'gpt-5-mini',
+      source: 'preset' as const
+    };
+
+    expect(formatCodexModelSnapshot(snapshot)).toBe('gpt-5-mini (GPT-5 mini)');
+    expect(getTaskModelChangeNotice(snapshot, modelSettings)).toBe(
+      'This task keeps gpt-5-mini. New model settings apply only to new tasks.'
+    );
+    expect(getTaskModelChangeNotice(undefined, modelSettings)).toBeUndefined();
   });
 });
 

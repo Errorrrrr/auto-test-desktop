@@ -50,6 +50,7 @@ describe('AppDataStorage task workspace', () => {
     await expect(access(storage.testCasesDir)).resolves.toBeUndefined();
     await expect(access(storage.runsDir)).resolves.toBeUndefined();
     await expect(access(storage.reportsDir)).resolves.toBeUndefined();
+    await expect(access(storage.settingsDir)).resolves.toBeUndefined();
     await expect(access(storage.tasksDir)).resolves.toBeUndefined();
     await expect(storage.getTaskStore().get(task.id)).resolves.toMatchObject({
       id: task.id,
@@ -62,6 +63,7 @@ describe('AppDataStorage task workspace', () => {
     const workspace = storage.getTaskWorkspace('task-safe');
 
     expect(workspace.rootDir).toBe(join(storage.tasksDir, 'task-safe'));
+    expect(storage.getCodexModelSettingsPath()).toBe(join(storage.settingsDir, 'codex-model.json'));
     expect(workspace.uploadsDir).toBe(join(storage.tasksDir, 'task-safe', 'uploads'));
     expect(workspace.generatedDir).toBe(join(storage.tasksDir, 'task-safe', 'generated'));
     expect(workspace.runsDir).toBe(join(storage.tasksDir, 'task-safe', 'runs'));

@@ -2,6 +2,7 @@ import type {
   AgentMessage,
   AgentSendMessageRequest,
   AgentSession,
+  CodexModelSnapshot,
   DeviceInfo,
   ServiceHealth,
   TestRunStatus
@@ -13,6 +14,7 @@ export interface AgentTestExecutionRequest {
   casePath?: string;
   device: DeviceInfo;
   prompt?: string;
+  modelSnapshot: CodexModelSnapshot;
   signal?: AbortSignal;
   targetAppId?: string;
   taskId?: string;

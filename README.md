@@ -55,6 +55,7 @@ MAESTRO_PROVIDER=mcp
 MAESTRO_APP_ID=com.example.app
 AGENT_PROVIDER=codex
 AGENT_COMMAND=codex
+AGENT_CODEX_MODEL=gpt-5
 AGENT_CODEX_SERVICE_TIER=fast
 RUN_TIMEOUT_MS=300000
 MAX_UPLOAD_SIZE_MB=25
@@ -72,6 +73,7 @@ Recommended local configuration:
 MAESTRO_PROVIDER=mcp
 AGENT_PROVIDER=codex
 AGENT_COMMAND=codex
+AGENT_CODEX_MODEL=gpt-5
 AGENT_CODEX_SERVICE_TIER=fast
 ```
 
@@ -79,7 +81,7 @@ AGENT_CODEX_SERVICE_TIER=fast
 
 Device discovery combines `adb devices -l` and `xcrun simctl list devices --json`. Android/iOS entries with `connected=false` are still shown, but run start remains blocked until a connected Android or iOS device is available.
 
-Agent integration currently supports Codex CLI for non-interactive task execution. `AGENT_PROVIDER=codex` checks that `AGENT_COMMAND` is installed and then runs `codex exec` with the selected device, optional App ID, uploaded YAML path, and/or natural-language instruction. The Codex child process is started with `--ignore-user-config` and an explicit `maestro mcp` server based on `MAESTRO_CLI_PATH`, so unrelated user MCP servers cannot fail the test run during startup. `AGENT_CODEX_SERVICE_TIER` defaults to `fast` so older Codex configs with `service_tier = "default"` do not block test execution; set it to `flex` when needed. `AGENT_PROVIDER=manual` and `manual-ready` keep run start blocked because they cannot execute tests.
+Agent integration currently supports Codex CLI for non-interactive task execution. `AGENT_PROVIDER=codex` checks that `AGENT_COMMAND` is installed and then runs `codex exec` with the selected device, optional App ID, uploaded YAML path, and/or natural-language instruction. The Codex child process is started with `--ignore-user-config`, an explicit `-m <model>` from the task/run model snapshot, and an explicit `maestro mcp` server based on `MAESTRO_CLI_PATH`, so unrelated user config cannot silently choose a different model or fail the test run during startup. `AGENT_CODEX_MODEL` sets the app default model for new tasks until the local model setting is saved; the effective model is persisted into each task, run, and report. `AGENT_CODEX_SERVICE_TIER` defaults to `fast` so older Codex configs with `service_tier = "default"` do not block test execution; set it to `flex` when needed. `AGENT_PROVIDER=manual` and `manual-ready` keep run start blocked because they cannot execute tests.
 
 Natural-language-only task runs are passed directly to Codex. `MAESTRO_APP_ID`, a task Target App ID, or an appId in the prompt is optional launch context for Codex/Maestro MCP rather than a local pre-generation requirement.
 
@@ -92,6 +94,8 @@ app-auto-test-desktop/
   runs/
     manifest.json
   reports/
+  settings/
+    codex-model.json
 ```
 
 Use `APP_AUTO_TEST_DATA_DIR` to override the root directory in development. `MAX_UPLOAD_SIZE_MB` controls YAML import size limits. YAML imports are copied into appData and rejected when the file is empty. Zip imports are rejected in P0 until safe extraction, YAML discovery, and path traversal defenses are implemented.

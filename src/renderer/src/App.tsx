@@ -16,6 +16,7 @@ import {
   Power,
   PowerOff,
   RefreshCw,
+  Save,
   Settings2,
   Smartphone,
   Trash2,
@@ -23,11 +24,14 @@ import {
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, ReactElement, useEffect, useMemo, useState } from 'react';
 
+import { CODEX_MODEL_PRESETS, DEFAULT_CODEX_MODEL_NAME } from '../../shared/codexModels';
 import { createRuntimeSnapshot } from '../../shared/runtimeSnapshot';
 import type {
   AgentMessage,
   AgentSession,
   AppAutoTestApi,
+  CodexModelSettingsResponse,
+  CodexModelSnapshot,
   DeviceInfo,
   DevicePlatform,
   EnvironmentStatus,
@@ -53,6 +57,8 @@ import {
   createCaseImportRequest,
   formatDateTime,
   formatDuration,
+  formatCodexModelSnapshot,
+  getTaskModelChangeNotice,
   getDeviceInspectionSummary,
   buildTaskRunLogSummaries,
   formatStatusLabel,
@@ -109,13 +115,66 @@ type TaskWorkspaceState = {
 };
 
 const DEVICE_START_REFRESH_DELAYS_MS = [1200, 2500, 5000];
+const APP_DEFAULT_MODEL_OPTION = '__app_default__';
 
-type MenuPage = 'overview' | 'task' | 'devices' | 'viewer';
+type MenuPage = 'overview' | 'task' | 'devices' | 'viewer' | 'settings';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timeout', 'blocked']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 const RUN_STATUS_POLL_INTERVAL_MS = 1_000;
 const RUN_STATUS_POLL_TIMEOUT_MS = 10 * 60_000;
+
+function getCodexPresetById(presetId: string | undefined) {
+  return CODEX_MODEL_PRESETS.find((preset) => preset.id === presetId);
+}
+
+function getCodexPresetByModelName(modelName: string | undefined) {
+  return CODEX_MODEL_PRESETS.find((preset) => preset.modelName === modelName);
+}
+
+function createModelSnapshot(
+  modelName = DEFAULT_CODEX_MODEL_NAME,
+  source: CodexModelSnapshot['source'] = 'app_default',
+  presetId?: string
+): CodexModelSnapshot {
+  return {
+    modelName,
+    source,
+    ...(presetId ? { presetId } : {}),
+    capturedAt: new Date().toISOString()
+  };
+}
+
+function createBrowserFallbackModelSettings(
+  request?: Partial<CodexModelSnapshot>
+): CodexModelSettingsResponse {
+  const preset = request?.presetId
+    ? getCodexPresetById(request.presetId)
+    : getCodexPresetByModelName(request?.modelName);
+  const source = request?.source ?? 'app_default';
+  const modelName = source === 'app_default'
+    ? DEFAULT_CODEX_MODEL_NAME
+    : request?.modelName ?? preset?.modelName ?? DEFAULT_CODEX_MODEL_NAME;
+  const presetId = source === 'preset' ? preset?.id ?? request?.presetId : undefined;
+  const updatedAt = new Date().toISOString();
+
+  return {
+    defaultModelName: DEFAULT_CODEX_MODEL_NAME,
+    ...(source === 'app_default'
+      ? {}
+      : {
+          settings: {
+            modelName,
+            source,
+            ...(presetId ? { presetId } : {}),
+            updatedAt
+          }
+        }),
+    effective: createModelSnapshot(modelName, source, presetId),
+    presets: CODEX_MODEL_PRESETS,
+    warning: 'Codex model settings require the Electron main process.'
+  };
+}
 
 function createIdleRunAction(): RunActionState {
   return {
@@ -183,6 +242,7 @@ function createBrowserFallbackTask(options: {
       blockers: prompt ? [] : ['Task input is required before execution.']
     },
     workspacePath: 'browser-fallback/tasks',
+    modelSnapshot: createModelSnapshot(),
     createdAt: now,
     updatedAt: now,
     ...(options.failureReason ? { failureReason: options.failureReason } : {})
@@ -204,6 +264,8 @@ function createBrowserFallbackTaskReport(taskId: string, summary: string): TaskR
     conclusion: 'Blocked before execution',
     failureReason: summary,
     artifacts: [],
+    modelSnapshot: createModelSnapshot(),
+    modelSummary: formatCodexModelSnapshot(createModelSnapshot()),
     markdown: `# Task report unavailable\n\n${summary}`
   };
 }
@@ -320,6 +382,8 @@ function createBrowserFallbackApi(): AppAutoTestApi {
           endedAt: generatedAt,
           conclusion: 'Blocked before execution',
           failureReason: summary,
+          modelSnapshot: createModelSnapshot(),
+          modelSummary: formatCodexModelSnapshot(createModelSnapshot()),
           markdown: `# ${copy.report.fallbackTitle}\n\n${summary}`
         };
       },
@@ -340,6 +404,8 @@ function createBrowserFallbackApi(): AppAutoTestApi {
           endedAt: generatedAt,
           conclusion: 'Blocked before execution',
           failureReason: summary,
+          modelSnapshot: createModelSnapshot(),
+          modelSummary: formatCodexModelSnapshot(createModelSnapshot()),
           markdown: `# ${copy.report.fallbackTitle}\n\n${summary}`
         };
       }
@@ -399,8 +465,11 @@ function createBrowserFallbackApi(): AppAutoTestApi {
       createSession: async () => ({
         id: `browser-session-${Date.now()}`,
         createdAt: new Date().toISOString(),
-        status: 'unavailable'
+        status: 'unavailable',
+        modelSnapshot: createModelSnapshot()
       }),
+      getModelSettings: async () => createBrowserFallbackModelSettings(),
+      saveModelSettings: async (request) => createBrowserFallbackModelSettings(request),
       sendMessage: async (request) => ({
         id: `browser-message-${Date.now()}`,
         sessionId: request.sessionId,
@@ -921,6 +990,10 @@ export function ReportPanel({
           <dd>{formatDuration(report.startedAt, report.endedAt, language)}</dd>
         </div>
         <div>
+          <dt>{copy.fields.model}</dt>
+          <dd>{localizeText(report.modelSummary ?? copy.model.legacyRun, language)}</dd>
+        </div>
+        <div>
           <dt>{copy.fields.generated}</dt>
           <dd>{formatDateTime(report.endedAt, language)}</dd>
         </div>
@@ -948,6 +1021,7 @@ export function TaskWorkspacePanel({
   report = null,
   reportExport = createIdleReportExportAction(),
   language = 'en',
+  modelSettings = null,
   onCancelRun,
   onCaseUpload,
   onCreateTask,
@@ -985,6 +1059,7 @@ export function TaskWorkspacePanel({
   report?: TaskReport | null;
   reportExport?: RunActionState;
   language?: Language;
+  modelSettings?: CodexModelSettingsResponse | null;
   onCancelRun?: () => void;
   onCaseUpload?: (event: ChangeEvent<HTMLInputElement>) => void;
   onCreateTask: (event: FormEvent<HTMLFormElement>) => void;
@@ -1024,6 +1099,7 @@ export function TaskWorkspacePanel({
       ...(selectedDevice ? { selectedDevice } : {})
     };
   const taskRunLogs = buildTaskRunLogSummaries(currentTask);
+  const taskModelNotice = getTaskModelChangeNotice(currentTask?.modelSnapshot, modelSettings);
   const runButtonLabel =
     currentTask && (currentTask.latestRunId || currentTask.runIds?.length) && !isActiveTaskStatus(currentTask.status)
       ? copy.actions.retest
@@ -1192,7 +1268,19 @@ export function TaskWorkspacePanel({
                 <dt>{copy.fields.device}</dt>
                 <dd>{currentTask.deviceSnapshot?.name ?? currentTask.deviceId ?? copy.runtime.notSelected}</dd>
               </div>
+              <div>
+                <dt>{copy.fields.model}</dt>
+                <dd>
+                  {localizeText(
+                    formatCodexModelSnapshot(currentTask.modelSnapshot, copy.model.legacyTask),
+                    language
+                  )}
+                </dd>
+              </div>
             </dl>
+            {taskModelNotice ? (
+              <p className="muted">{localizeText(taskModelNotice, language)}</p>
+            ) : null}
 
             <div className="task-detail-sections">
               <section className="task-detail-section" data-task-detail-section="devices">
@@ -1431,6 +1519,113 @@ export function TaskWorkspacePanel({
   );
 }
 
+export function ModelSettingsPanel({
+  draftModelName,
+  draftPresetId,
+  language = 'en',
+  modelSettings,
+  onDraftModelNameChange,
+  onDraftPresetChange,
+  onSave,
+  saveState
+}: {
+  draftModelName: string;
+  draftPresetId: string;
+  language?: Language;
+  modelSettings: CodexModelSettingsResponse | null;
+  onDraftModelNameChange: (value: string) => void;
+  onDraftPresetChange: (value: string) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+  saveState: RunActionState;
+}): ReactElement {
+  const copy = COPY[language];
+  const activeSnapshot = modelSettings?.effective;
+  const activeModel = activeSnapshot
+    ? formatCodexModelSnapshot(activeSnapshot)
+    : copy.runtime.notLoaded;
+  const saveDetail =
+    saveState.detail ||
+    modelSettings?.warning ||
+    (activeSnapshot
+      ? `Codex model ${activeSnapshot.modelName} is active for new tasks.`
+      : 'Codex model settings are not configured.');
+
+  return (
+    <section className="workspace-page" data-page="settings">
+      <article className="panel model-settings-panel">
+        <div className="panel-heading split">
+          <div>
+            <Settings2 size={20} aria-hidden="true" />
+            <h2>{copy.titles.modelSettings}</h2>
+          </div>
+          <StatusPill status={activeSnapshot?.source ?? 'not_configured'} language={language} />
+        </div>
+
+        <p className="muted">{copy.copy.modelSettingsHelp}</p>
+
+        <dl className="metric-grid compact">
+          <div>
+            <dt>{copy.fields.model}</dt>
+            <dd>{activeModel}</dd>
+          </div>
+          <div>
+            <dt>{copy.fields.source}</dt>
+            <dd>{activeSnapshot ? formatStatusLabel(activeSnapshot.source, language) : copy.runtime.notLoaded}</dd>
+          </div>
+        </dl>
+
+        <form className="settings-form" onSubmit={onSave}>
+          <label className="field-label" htmlFor="codex-model-preset">
+            {copy.fields.preset}
+          </label>
+          <select
+            id="codex-model-preset"
+            className="text-input"
+            value={draftPresetId}
+            onChange={(event) => onDraftPresetChange(event.target.value)}
+          >
+            <option value={APP_DEFAULT_MODEL_OPTION}>
+              {formatStatusLabel('app_default', language)} ({modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME})
+            </option>
+            <option value="">{copy.model.customOption}</option>
+            {(modelSettings?.presets ?? CODEX_MODEL_PRESETS).map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label} ({preset.modelName})
+              </option>
+            ))}
+          </select>
+
+          <label className="field-label" htmlFor="codex-model-name">
+            {copy.copy.customModelLabel}
+          </label>
+          <input
+            id="codex-model-name"
+            className="text-input"
+            value={draftModelName}
+            disabled={draftPresetId === APP_DEFAULT_MODEL_OPTION}
+            onChange={(event) => onDraftModelNameChange(event.target.value)}
+            placeholder={copy.copy.modelNamePlaceholder}
+            spellCheck={false}
+          />
+
+          <button className="primary-button" disabled={saveState.status === 'busy'} type="submit">
+            {saveState.status === 'busy' ? (
+              <Loader2 className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <Save size={18} aria-hidden="true" />
+            )}
+            {copy.actions.save}
+          </button>
+        </form>
+
+        <p className={saveState.status === 'error' ? 'validation-message' : 'muted'}>
+          {localizeText(saveDetail, language)}
+        </p>
+      </article>
+    </section>
+  );
+}
+
 export function App(): ReactElement {
   const [language, setLanguage] = useState<Language>(() => readStoredLanguage());
   const [activePage, setActivePage] = useState<MenuPage>('overview');
@@ -1447,6 +1642,13 @@ export function App(): ReactElement {
   const [taskAction, setTaskAction] = useState<RunActionState>({
     status: 'idle',
     detail: 'Task has not been created.'
+  });
+  const [modelSettings, setModelSettings] = useState<CodexModelSettingsResponse | null>(null);
+  const [modelDraftName, setModelDraftName] = useState(DEFAULT_CODEX_MODEL_NAME);
+  const [modelDraftPresetId, setModelDraftPresetId] = useState(APP_DEFAULT_MODEL_OPTION);
+  const [modelSaveAction, setModelSaveAction] = useState<RunActionState>({
+    status: 'idle',
+    detail: 'Codex model settings are not configured.'
   });
   const [deletingTaskId, setDeletingTaskId] = useState('');
   const [agentSession] = useState<AgentSession | null>(null);
@@ -1481,12 +1683,13 @@ export function App(): ReactElement {
       getRunReadiness({
         environment,
         devices,
+        modelSettings,
         selectedDeviceId,
         task: currentTask,
         prompt,
         targetAppId
       }),
-    [currentTask, devices, environment, prompt, selectedDeviceId, targetAppId]
+    [currentTask, devices, environment, modelSettings, prompt, selectedDeviceId, targetAppId]
   );
   const selectedDevice = getSelectedDevice(devices, selectedDeviceId);
   const currentTaskCase = currentTask?.input.testCase;
@@ -1568,11 +1771,38 @@ export function App(): ReactElement {
       page: 'viewer',
       label: copy.nav.viewer,
       icon: <MonitorSmartphone size={18} aria-hidden="true" />
+    },
+    {
+      page: 'settings',
+      label: copy.nav.settings,
+      icon: <Settings2 size={18} aria-hidden="true" />
     }
   ];
 
   function canReuseTask(task: TestTask | null): task is TestTask {
     return Boolean(task && !isActiveTaskStatus(task.status));
+  }
+
+  function getPresetIdForModelSettings(nextSettings: CodexModelSettingsResponse): string {
+    if (nextSettings.effective.source === 'app_default') {
+      return APP_DEFAULT_MODEL_OPTION;
+    }
+
+    if (nextSettings.effective.source === 'preset') {
+      return (
+        nextSettings.effective.presetId ??
+        nextSettings.presets.find((preset) => preset.modelName === nextSettings.effective.modelName)?.id ??
+        ''
+      );
+    }
+
+    return '';
+  }
+
+  function applyModelSettingsResponse(nextSettings: CodexModelSettingsResponse): void {
+    setModelSettings(nextSettings);
+    setModelDraftName(nextSettings.effective.modelName);
+    setModelDraftPresetId(getPresetIdForModelSettings(nextSettings));
   }
 
   function mergeTaskWorkspaceState(
@@ -1665,6 +1895,67 @@ export function App(): ReactElement {
     });
   }
 
+  function handleDraftPresetChange(presetId: string): void {
+    setModelDraftPresetId(presetId);
+
+    if (presetId === APP_DEFAULT_MODEL_OPTION) {
+      setModelDraftName(modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME);
+      return;
+    }
+
+    const preset = (modelSettings?.presets ?? CODEX_MODEL_PRESETS).find(
+      (candidate) => candidate.id === presetId
+    );
+
+    if (preset) {
+      setModelDraftName(preset.modelName);
+    }
+  }
+
+  async function handleSaveModelSettings(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    setModelSaveAction({
+      status: 'busy',
+      detail: 'Saving Codex model settings.'
+    });
+
+    try {
+      const selectedPreset = (modelSettings?.presets ?? CODEX_MODEL_PRESETS).find(
+        (preset) => preset.id === modelDraftPresetId
+      );
+      const modelName = modelDraftName.trim();
+      const nextSettings = await api.agent.saveModelSettings(
+        modelDraftPresetId === APP_DEFAULT_MODEL_OPTION
+          ? {
+              modelName: modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME,
+              source: 'app_default'
+            }
+          : selectedPreset
+            ? {
+                modelName: selectedPreset.modelName,
+                presetId: selectedPreset.id,
+                source: 'preset'
+              }
+            : {
+                modelName,
+                source: 'custom'
+              }
+      );
+
+      applyModelSettingsResponse(nextSettings);
+      setModelSaveAction({
+        status: 'success',
+        detail: 'Codex model settings saved. New tasks will use the selected model.'
+      });
+    } catch (error) {
+      setModelSaveAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
+    }
+  }
+
   async function syncTaskInput(
     task: TestTask,
     nextPrompt: string,
@@ -1705,6 +1996,14 @@ export function App(): ReactElement {
       setTaskAction({
         status: 'error',
         detail: 'Enter a task name.'
+      });
+      return;
+    }
+
+    if (!modelSettings) {
+      setTaskAction({
+        status: 'error',
+        detail: 'Codex model settings are still loading.'
       });
       return;
     }
@@ -1800,11 +2099,12 @@ export function App(): ReactElement {
     setRuntimeState({ status: 'busy', detail: 'Refreshing local runtime status.' });
 
     try {
-      const [nextEnvironment, nextDevices, nextViewerConfig, tasks] = await Promise.all([
+      const [nextEnvironment, nextDevices, nextViewerConfig, tasks, nextModelSettings] = await Promise.all([
         api.env.getStatus(),
         api.devices.list(),
         api.viewer.getConfig(),
-        api.tasks.list()
+        api.tasks.list(),
+        api.agent.getModelSettings()
       ]);
       const nextTask = getSelectedTaskAfterRefresh(selectedTaskId, tasks);
 
@@ -1813,6 +2113,7 @@ export function App(): ReactElement {
       setViewerConfig(nextViewerConfig);
       setViewerUrl(nextViewerConfig.url);
       setTasks(tasks);
+      applyModelSettingsResponse(nextModelSettings);
       setSelectedTaskId(nextTask?.id ?? '');
       hydrateTaskWorkspaces(tasks, nextTask, nextDevices);
       if (nextTask) {
@@ -2441,6 +2742,7 @@ export function App(): ReactElement {
               report={report}
               reportExport={reportExport}
               language={language}
+              modelSettings={modelSettings}
               onCancelRun={() => void handleCancelRun()}
               onCaseUpload={(event) => void handleCaseUpload(event)}
               onCreateTask={(event) => void handleCreateTask(event)}
@@ -2548,6 +2850,22 @@ export function App(): ReactElement {
             <span className="subtle-line">{copy.copy.requirementHint}</span>
           </article>
           </section>
+        ) : null}
+
+        {activePage === 'settings' ? (
+          <ModelSettingsPanel
+            draftModelName={modelDraftName}
+            draftPresetId={modelDraftPresetId}
+            language={language}
+            modelSettings={modelSettings}
+            onDraftModelNameChange={(value) => {
+              setModelDraftName(value);
+              setModelDraftPresetId('');
+            }}
+            onDraftPresetChange={handleDraftPresetChange}
+            onSave={(event) => void handleSaveModelSettings(event)}
+            saveState={modelSaveAction}
+          />
         ) : null}
       </section>
     </main>

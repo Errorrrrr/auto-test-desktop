@@ -144,6 +144,8 @@ describe('main process IPC handlers', () => {
     expect(Object.keys(handlers).sort()).toEqual(
       [
         IPC_CHANNELS.agent.createSession,
+        IPC_CHANNELS.agent.getModelSettings,
+        IPC_CHANNELS.agent.saveModelSettings,
         IPC_CHANNELS.agent.sendMessage,
         IPC_CHANNELS.cases.import,
         IPC_CHANNELS.devices.list,
@@ -182,6 +184,24 @@ describe('main process IPC handlers', () => {
         name: 'Smoke task'
       })
     ]);
+    await expect(invokeIpcHandler(handlers, IPC_CHANNELS.agent.getModelSettings)).resolves.toMatchObject({
+      effective: {
+        modelName: 'gpt-5',
+        source: 'app_default'
+      }
+    });
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.agent.saveModelSettings, {
+        modelName: 'gpt-5-mini',
+        source: 'preset',
+        presetId: 'gpt-5-mini'
+      })
+    ).resolves.toMatchObject({
+      effective: {
+        modelName: 'gpt-5-mini',
+        source: 'preset'
+      }
+    });
     await expect(
       invokeIpcHandler(handlers, IPC_CHANNELS.tasks.start, {
         taskId: (task as { id: string }).id,

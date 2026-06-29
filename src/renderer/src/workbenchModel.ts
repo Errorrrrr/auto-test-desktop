@@ -1,4 +1,6 @@
 import type {
+  CodexModelSettingsResponse,
+  CodexModelSnapshot,
   DeviceInfo,
   DeviceStartResult,
   DeviceStopResult,
@@ -17,6 +19,7 @@ import type {
   ViewerProbeResult,
   ViewerReachability
 } from '../../shared/types';
+import { CODEX_MODEL_PRESETS } from '../../shared/codexModels';
 import { redactReportText } from '../../shared/redaction';
 import { isAllowedLocalViewerUrl, normalizeViewerUrl } from '../../shared/viewerConfig';
 import {
@@ -30,6 +33,7 @@ import {
 
 export const MAX_UPLOAD_SIZE_MB = 25;
 export const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+export const LEGACY_CODEX_MODEL_LABEL = 'Not recorded (legacy run)';
 
 export type AsyncStatus = 'idle' | 'busy' | 'success' | 'error';
 
@@ -399,6 +403,7 @@ export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSumma
 export function getRunReadiness(input: {
   environment: EnvironmentStatus | null;
   devices: DeviceInfo[];
+  modelSettings?: CodexModelSettingsResponse | null;
   selectedDeviceId: string;
   task: TestTask | null;
   prompt: string;
@@ -410,6 +415,10 @@ export function getRunReadiness(input: {
 
   if (!input.environment) {
     reasons.push('Runtime status is still loading.');
+  }
+
+  if ('modelSettings' in input && !input.modelSettings && !input.task?.modelSnapshot) {
+    reasons.push('Codex model settings are still loading.');
   }
 
   if (!input.task) {
@@ -448,6 +457,46 @@ export function getRunReadiness(input: {
     selectedDevice,
     inputMode
   };
+}
+
+const CODEX_MODEL_SOURCE_LABELS: Record<CodexModelSnapshot['source'], string> = {
+  app_default: 'app default',
+  custom: 'custom',
+  preset: 'preset'
+};
+
+function getCodexModelSnapshotLabel(snapshot: CodexModelSnapshot): string {
+  if (snapshot.source !== 'preset') {
+    return CODEX_MODEL_SOURCE_LABELS[snapshot.source];
+  }
+
+  return (
+    CODEX_MODEL_PRESETS.find((preset) => preset.id === snapshot.presetId)?.label ??
+    CODEX_MODEL_PRESETS.find((preset) => preset.modelName === snapshot.modelName)?.label ??
+    CODEX_MODEL_SOURCE_LABELS.preset
+  );
+}
+
+export function formatCodexModelSnapshot(
+  snapshot: CodexModelSnapshot | undefined,
+  fallback = LEGACY_CODEX_MODEL_LABEL
+): string {
+  if (!snapshot) {
+    return fallback;
+  }
+
+  return `${snapshot.modelName} (${getCodexModelSnapshotLabel(snapshot)})`;
+}
+
+export function getTaskModelChangeNotice(
+  taskSnapshot: CodexModelSnapshot | undefined,
+  settings: CodexModelSettingsResponse | null
+): string | undefined {
+  if (!taskSnapshot || !settings || taskSnapshot.modelName === settings.effective.modelName) {
+    return undefined;
+  }
+
+  return `This task keeps ${taskSnapshot.modelName}. New model settings apply only to new tasks.`;
 }
 
 export function validateViewerUrl(value: string): ViewerProbeState | null {
@@ -572,6 +621,7 @@ export function getStatusTone(status: ServiceStatus | TestRunStatus | string): s
     status === 'queued' ||
     status === 'running' ||
     status === 'unchecked' ||
+    status === 'app_default' ||
     status === 'default'
   ) {
     return 'warning';
@@ -612,6 +662,7 @@ export function createReportPlaceholder(input: {
   const prompt = redactReportText(run.prompt) ?? '';
   const markdownLabels = copy.report.markdownLabels;
   const localizedFailureReason = failureReason ? localizeText(failureReason, language) : failureReason;
+  const modelSummary = formatCodexModelSnapshot(run.modelSnapshot);
 
   return {
     runId: run.id,
@@ -626,6 +677,8 @@ export function createReportPlaceholder(input: {
     endedAt: run.completedAt ?? run.updatedAt,
     conclusion: formatStatusLabel(run.status, language),
     failureReason: localizedFailureReason,
+    modelSummary,
+    ...(run.modelSnapshot ? { modelSnapshot: run.modelSnapshot } : {}),
     markdown: [
       `# ${copy.report.markdownHeading}`,
       '',
@@ -633,6 +686,7 @@ export function createReportPlaceholder(input: {
       `- ${markdownLabels.status}: ${formatStatusLabel(run.status, language)}`,
       `- ${markdownLabels.target}: ${safeTarget}`,
       `- ${markdownLabels.case}: ${safeTestCaseName}`,
+      `- ${markdownLabels.model}: ${localizeText(modelSummary, language)}`,
       `- ${markdownLabels.prompt}: ${prompt}`,
       `- ${markdownLabels.duration}: ${formatDuration(run.createdAt, run.updatedAt, language)}`,
       ...(localizedFailureReason ? [`- ${markdownLabels.failure}: ${localizedFailureReason}`] : [])

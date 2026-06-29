@@ -64,10 +64,12 @@ export function persistLanguage(language: Language, storage?: WritableStorage): 
 const STATUS_LABELS: Record<Language, Record<string, string>> = {
   zh: {
     accepted: '已接受',
+    app_default: '应用默认',
     blocked: '已阻塞',
     busy: '处理中',
     cancelled: '已取消',
     checking: '检查中',
+    custom: '自定义',
     default: '默认',
     degraded: '部分可用',
     disconnected: '已断开',
@@ -78,6 +80,7 @@ const STATUS_LABELS: Record<Language, Record<string, string>> = {
     mixed: '混合输入',
     natural_language: '自然语言',
     not_configured: '未配置',
+    preset: '预置',
     queued: '排队中',
     reachable: '可访问',
     ready: '就绪',
@@ -129,6 +132,10 @@ const EXACT_ZH: Record<string, string> = {
   'Codex task execution was cancelled.': 'Codex 任务执行已取消。',
   'Codex CLI and Maestro MCP execution require the Electron main process.':
     'Codex CLI 与 Maestro MCP 执行需要 Electron 主进程。',
+  'Codex model settings are still loading.': 'Codex 模型设置仍在加载。',
+  'Codex model settings are not configured.': '尚未配置 Codex 模型设置。',
+  'Codex model settings saved. New tasks will use the selected model.':
+    'Codex 模型设置已保存，新任务会使用所选模型。',
   'Manual-ready Agent mode cannot execute task tests. Configure AGENT_PROVIDER=codex so Codex CLI can call Maestro MCP.':
     'manual-ready Agent 模式不能执行测试任务。请配置 AGENT_PROVIDER=codex，让 Codex CLI 调用 Maestro MCP。',
   'Local device discovery has not been checked yet.': '尚未检查本地设备。',
@@ -155,6 +162,8 @@ const EXACT_ZH: Record<string, string> = {
   'No connected Android or iOS device is available in this baseline.':
     '当前基线中没有可用的已连接 Android 或 iOS 设备。',
   'No run has been started.': '尚未开始运行。',
+  'Not recorded (legacy run)': '未记录（历史运行）',
+  'Not recorded (legacy task)': '未记录（历史任务）',
   'Pending': '待定',
   'Refresh runtime': '刷新运行时',
   'Refreshing local runtime status.': '正在刷新本地运行时状态。',
@@ -173,6 +182,7 @@ const EXACT_ZH: Record<string, string> = {
   'Select a connected Android or iOS device.': '请选择已连接的 Android 或 iOS 设备。',
   'Selected device is not connected for execution.': '所选设备未连接，无法执行。',
   'Sending Agent instruction and starting the local run.': '正在发送 Agent 指令并启动本地运行。',
+  'Saving Codex model settings.': '正在保存 Codex 模型设置。',
   'Starting the task-scoped local run.': '正在启动任务级本地运行。',
   'Supported formats: .yaml, .yml.': '支持格式：.yaml、.yml。',
   'Supported formats: .yaml, .yml. Maximum size: 25 MB.': '支持格式：.yaml、.yml。最大 25 MB。',
@@ -216,6 +226,7 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
     [/^Agent command "(.+)" is unavailable: (.+)$/, (match) => `Agent 命令 "${match[1]}" 不可用：${match[2]}`],
     [/^Codex CLI command "(.+)" is installed\. Task execution will be delegated to Codex, which should call Maestro MCP\.$/, (match) => `Codex CLI 命令 "${match[1]}" 已安装。测试执行会委托给 Codex，并由 Codex 调用 Maestro MCP。`],
     [/^Codex CLI command "(.+)" is unavailable: (.+)$/, (match) => `Codex CLI 命令 "${match[1]}" 不可用：${match[2]}`],
+    [/^Codex model (.+) is active for new tasks\.$/, (match) => `Codex 模型 ${match[1]} 将用于新任务。`],
     [/^Cancelling (.+)\.$/, (match) => `正在取消 ${match[1]}。`],
     [/^Direct MCP calls are not available inside the desktop client; CLI fallback is available \((.+)\)\.$/, (match) => `桌面客户端内不可直接调用 MCP；CLI fallback 可用（${match[1]}）。`],
     [/^Direct MCP calls are not available inside the desktop client; CLI fallback command is configured \((.+)\)\.$/, (match) => `桌面客户端内不可直接调用 MCP；CLI fallback 命令已配置（${match[1]}）。`],
@@ -248,6 +259,7 @@ function localizeKnownDynamicText(value: string, language: Language): string | n
     [/^Task (.+) is already (.+)\.$/, (match) => `任务 ${match[1]} 已经是 ${localizeStatus(match[2], language)} 状态。`],
     [/^Task (.+) finished as (.+)\.$/, (match) => `任务 ${match[1]} 已结束，状态：${localizeStatus(match[2], language)}。`],
     [/^Task (.+) is (.+)\.$/, (match) => `任务 ${match[1]} 当前状态：${localizeStatus(match[2], language)}。`],
+    [/^This task keeps (.+)\. New model settings apply only to new tasks\.$/, (match) => `此任务继续使用 ${match[1]}。新的模型设置只影响新任务。`],
     [/^Task (.+) created\.$/, (match) => `任务 ${match[1]} 已创建。`],
     [/^Test case (.+) was not found\.$/, (match) => `未找到测试用例 ${match[1]}。`],
     [/^Test case is (.+); max upload size is (.+)\.$/, (match) => `测试用例大小为 ${match[1]}，上传上限为 ${match[2]}。`],
@@ -309,6 +321,7 @@ export const COPY = {
       task: '测试任务',
       viewer: 'Viewer',
       devices: '设备管理',
+      settings: '设置',
       input: '输入',
       run: '执行',
       report: '报告'
@@ -324,6 +337,7 @@ export const COPY = {
       probe: '探测',
       refresh: '刷新',
       retest: '重新测试',
+      save: '保存',
       startDevice: '开启',
       stopDevice: '关闭',
       startRun: '开始运行'
@@ -337,6 +351,7 @@ export const COPY = {
       deviceManagement: '设备管理',
       executeTest: '执行测试',
       maestro: 'Maestro',
+      modelSettings: 'Codex 模型设置',
       report: '报告',
       runStatus: '运行状态',
       taskDetailWorkspace: '详情工作区',
@@ -387,8 +402,11 @@ export const COPY = {
       imported: '导入时间',
       input: '输入',
       localTarget: '本地地址',
+      model: 'Codex 模型',
       name: '名称',
+      preset: '预置',
       run: '运行',
+      source: '来源',
       status: '状态',
       task: '任务',
       target: '目标',
@@ -397,9 +415,12 @@ export const COPY = {
     },
     copy: {
       createTaskFirst: '任务创建后，才能继续选择设备、配置输入并执行测试。',
+      customModelLabel: '自定义模型',
       defaultCaseLabel: '选择 Maestro YAML',
       inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者都会交给 Codex 通过 Maestro MCP 执行。',
       deleteTaskConfirm: (name: string) => `确认删除测试任务“${name}”？该操作会移除任务工作区数据。`,
+      modelNamePlaceholder: '例如 gpt-5',
+      modelSettingsHelp: '保存后的模型只影响新建任务；已创建任务继续使用自己的模型快照。',
       naturalLanguageLabel: '自然语言',
       promptPlaceholder: '在所选设备上运行已上传的冒烟 flow',
       promptOnlyLimit: '自然语言会直接交给 Codex 执行；目标 App ID 可选，但填写后会作为启动上下文传入。',
@@ -444,6 +465,11 @@ export const COPY = {
       selectedDevice: '所选设备',
       noTask: '未创建任务'
     },
+    model: {
+      customOption: '自定义',
+      legacyRun: '未记录（历史运行）',
+      legacyTask: '未记录（历史任务）'
+    },
     roles: {
       assistant: '助手',
       system: '系统',
@@ -459,6 +485,7 @@ export const COPY = {
         case: '用例',
         duration: '耗时',
         failure: '失败原因',
+        model: 'Codex 模型',
         prompt: '指令',
         run: '运行',
         status: '状态',
@@ -484,6 +511,7 @@ export const COPY = {
       task: 'Test Tasks',
       viewer: 'Viewer',
       devices: 'Device Management',
+      settings: 'Settings',
       input: 'Input',
       run: 'Run',
       report: 'Report'
@@ -499,6 +527,7 @@ export const COPY = {
       probe: 'Probe',
       refresh: 'Refresh',
       retest: 'Retest',
+      save: 'Save',
       startDevice: 'Start',
       stopDevice: 'Stop',
       startRun: 'Start Run'
@@ -512,6 +541,7 @@ export const COPY = {
       deviceManagement: 'Device Management',
       executeTest: 'Execute Test',
       maestro: 'Maestro',
+      modelSettings: 'Codex Model Settings',
       report: 'Report',
       runStatus: 'Run Status',
       taskDetailWorkspace: 'Detail Workspace',
@@ -562,8 +592,11 @@ export const COPY = {
       imported: 'Imported',
       input: 'Input',
       localTarget: 'Local target',
+      model: 'Codex model',
       name: 'Name',
+      preset: 'Preset',
       run: 'Run',
+      source: 'Source',
       status: 'Status',
       task: 'Task',
       target: 'Target',
@@ -572,9 +605,12 @@ export const COPY = {
     },
     copy: {
       createTaskFirst: 'Create the task before selecting a device, configuring input, and executing the test.',
+      customModelLabel: 'Custom model',
       defaultCaseLabel: 'Select Maestro YAML',
       inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. Both are delegated to Codex through Maestro MCP.',
       deleteTaskConfirm: (name: string) => `Delete test task "${name}"? This removes its task workspace data.`,
+      modelNamePlaceholder: 'Example: gpt-5',
+      modelSettingsHelp: 'Saved models apply only to new tasks. Existing tasks keep their own model snapshot.',
       naturalLanguageLabel: 'Natural language',
       promptPlaceholder: 'Run the uploaded smoke flow on the selected device',
       promptOnlyLimit: 'Prompt-only execution is delegated directly to Codex. Target App ID is optional and passed as launch context when present.',
@@ -618,6 +654,11 @@ export const COPY = {
       selectedDevice: 'selected device',
       noTask: 'No task created'
     },
+    model: {
+      customOption: 'Custom',
+      legacyRun: 'Not recorded (legacy run)',
+      legacyTask: 'Not recorded (legacy task)'
+    },
     roles: {
       assistant: 'assistant',
       system: 'system',
@@ -633,6 +674,7 @@ export const COPY = {
         case: 'Case',
         duration: 'Duration',
         failure: 'Failure',
+        model: 'Codex model',
         prompt: 'Prompt',
         run: 'Run',
         status: 'Status',

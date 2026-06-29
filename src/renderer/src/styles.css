@@ -609,6 +609,16 @@ h2 {
   gap: 10px;
 }
 
+.settings-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.model-settings-panel {
+  min-height: 0;
+}
+
 .task-description-input {
   min-height: 86px;
   padding: 10px 12px;

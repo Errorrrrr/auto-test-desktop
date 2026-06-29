@@ -103,6 +103,44 @@ export interface RuntimeSnapshot {
   };
 }
 
+export type CodexModelSource = 'app_default' | 'preset' | 'custom';
+
+export interface CodexModelPreset {
+  id: string;
+  label: string;
+  modelName: string;
+  recommended?: boolean;
+}
+
+export interface CodexModelSettings {
+  modelName: string;
+  source: CodexModelSource;
+  presetId?: string;
+  updatedAt: string;
+}
+
+export interface CodexModelSettingsSaveRequest {
+  modelName: string;
+  source: CodexModelSource;
+  presetId?: string;
+}
+
+export interface CodexModelSnapshot {
+  modelName: string;
+  source: CodexModelSource;
+  presetId?: string;
+  capturedAt: string;
+  settingsUpdatedAt?: string;
+}
+
+export interface CodexModelSettingsResponse {
+  settings?: CodexModelSettings;
+  effective: CodexModelSnapshot;
+  presets: CodexModelPreset[];
+  defaultModelName: string;
+  warning?: string;
+}
+
 export type ViewerReachability = 'unchecked' | 'reachable' | 'unreachable';
 
 export interface ViewerProbeRequest {
@@ -175,6 +213,7 @@ export type TaskLogEntryKind =
   | 'task_created'
   | 'input_updated'
   | 'case_imported'
+  | 'model_snapshot_captured'
   | 'run_started'
   | 'run_completed'
   | 'report_generated';
@@ -209,6 +248,7 @@ export interface TestTask {
   startedAt?: string;
   completedAt?: string;
   failureReason?: string;
+  modelSnapshot?: CodexModelSnapshot;
 }
 
 export interface TaskCreateRequest {
@@ -254,6 +294,8 @@ export interface TaskReport {
   endedAt: string;
   conclusion: string;
   failureReason?: string;
+  modelSummary?: string;
+  modelSnapshot?: CodexModelSnapshot;
   artifacts: TaskReportArtifact[];
   markdown: string;
   filePath?: string;
@@ -266,6 +308,7 @@ export interface AgentSession {
   id: string;
   createdAt: string;
   status: AgentSessionStatus;
+  modelSnapshot?: CodexModelSnapshot;
 }
 
 export interface AgentSendMessageRequest {
@@ -320,6 +363,7 @@ export interface TestRun {
   failureReason?: string;
   stdout?: string;
   stderr?: string;
+  modelSnapshot?: CodexModelSnapshot;
 }
 
 export type ReportFormat = 'page' | 'markdown';
@@ -346,6 +390,8 @@ export interface TestReport {
   endedAt: string;
   conclusion: string;
   failureReason?: string;
+  modelSummary?: string;
+  modelSnapshot?: CodexModelSnapshot;
   markdown: string;
   filePath?: string;
 }
@@ -389,6 +435,8 @@ export interface AppAutoTestApi {
   };
   agent: {
     createSession: () => Promise<AgentSession>;
+    getModelSettings: () => Promise<CodexModelSettingsResponse>;
+    saveModelSettings: (request: CodexModelSettingsSaveRequest) => Promise<CodexModelSettingsResponse>;
     sendMessage: (request: AgentSendMessageRequest) => Promise<AgentMessage>;
   };
 }

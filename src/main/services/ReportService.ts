@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { redactReportText } from '../../shared/redaction';
 import type {
+  CodexModelSnapshot,
   TaskReport,
   TaskReportArtifact,
   TestReport,
@@ -39,6 +40,12 @@ const TASK_STATUS_CONCLUSION: Record<TestTaskStatus, string> = {
   timeout: 'Timed out'
 };
 
+const MODEL_SOURCE_LABELS: Record<CodexModelSnapshot['source'], string> = {
+  app_default: 'app default',
+  custom: 'custom',
+  preset: 'preset'
+};
+
 function formatDuration(start: string, end: string): string {
   const startMs = Date.parse(start);
   const endMs = Date.parse(end);
@@ -60,6 +67,18 @@ function formatTargetDevice(run: TestRun): string {
 
 function formatTestCase(run: TestRun): string {
   return run.caseName ? `${run.caseName} (${run.caseId})` : run.caseId;
+}
+
+function formatModelSnapshot(modelSnapshot: CodexModelSnapshot | undefined): string {
+  if (!modelSnapshot) {
+    return 'Not recorded (legacy run)';
+  }
+
+  return `${modelSnapshot.modelName} (${MODEL_SOURCE_LABELS[modelSnapshot.source]})`;
+}
+
+function getTaskModelSnapshot(task: TestTask, run?: TestRun): CodexModelSnapshot | undefined {
+  return run?.modelSnapshot ?? task.modelSnapshot;
 }
 
 function formatTaskTargetDevice(task: TestTask, run?: TestRun): string {
@@ -136,6 +155,7 @@ function buildTaskMarkdown(
     ...(run ? [`- Run: ${run.id}`] : []),
     `- Status: ${report.status}`,
     `- Conclusion: ${report.conclusion}`,
+    `- Codex model: ${report.modelSummary ?? formatModelSnapshot(report.modelSnapshot)}`,
     `- Target device: ${report.targetDevice}`,
     `- Started: ${report.startedAt}`,
     `- Ended: ${report.endedAt}`,
@@ -180,6 +200,7 @@ function buildMarkdown(run: TestRun, report: Omit<TestReport, 'markdown'>): stri
     `- Run: ${run.id}`,
     `- Conclusion: ${report.conclusion}`,
     `- Status: ${run.status}`,
+    `- Codex model: ${report.modelSummary ?? formatModelSnapshot(report.modelSnapshot)}`,
     `- Target device: ${report.targetDevice}`,
     `- Test case: ${report.testCase}`,
     `- Agent instruction: ${report.prompt}`,
@@ -232,6 +253,7 @@ export class ReportService {
     const conclusion = STATUS_CONCLUSION[run.status];
     const failureReason = redactReportText(run.failureReason);
     const summary = failureReason ?? `Run ${run.id} is ${run.status}.`;
+    const modelSnapshot = run.modelSnapshot;
     const reportWithoutMarkdown: Omit<TestReport, 'markdown'> = {
       runId,
       title: `Test report for ${redactReportText(run.caseName ?? run.caseId)}`,
@@ -244,7 +266,9 @@ export class ReportService {
       startedAt: run.startedAt ?? run.createdAt,
       endedAt,
       conclusion,
-      failureReason
+      failureReason,
+      modelSummary: formatModelSnapshot(modelSnapshot),
+      ...(modelSnapshot ? { modelSnapshot } : {})
     };
 
     return {
@@ -273,6 +297,7 @@ export class ReportService {
   async generateForTask(task: TestTask, run?: TestRun): Promise<TaskReport> {
     const status = task.status;
     const failureReason = redactReportText(task.failureReason ?? run?.failureReason);
+    const modelSnapshot = getTaskModelSnapshot(task, run);
     const reportWithoutMarkdown: Omit<TaskReport, 'markdown'> = {
       taskId: task.id,
       ...(run ? { runId: run.id } : {}),
@@ -285,6 +310,8 @@ export class ReportService {
       endedAt: task.completedAt ?? run?.completedAt ?? run?.updatedAt ?? task.updatedAt,
       conclusion: TASK_STATUS_CONCLUSION[status],
       ...(failureReason ? { failureReason } : {}),
+      modelSummary: formatModelSnapshot(modelSnapshot),
+      ...(modelSnapshot ? { modelSnapshot } : {}),
       artifacts: getTaskArtifacts(task)
     };
 

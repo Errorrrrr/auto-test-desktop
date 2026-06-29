@@ -37,6 +37,8 @@ export const IPC_CHANNELS = {
   },
   agent: {
     createSession: 'agent:create-session',
+    getModelSettings: 'agent:get-model-settings',
+    saveModelSettings: 'agent:save-model-settings',
     sendMessage: 'agent:send-message'
   }
 } as const;

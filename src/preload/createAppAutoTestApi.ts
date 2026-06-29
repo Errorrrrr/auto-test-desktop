@@ -3,6 +3,8 @@ import type {
   AgentMessage,
   AgentSendMessageRequest,
   AgentSession,
+  CodexModelSettingsResponse,
+  CodexModelSettingsSaveRequest,
   AppAutoTestApi,
   DeviceInfo,
   DeviceStartResult,
@@ -72,6 +74,10 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
     },
     agent: {
       createSession: () => invoke<AgentSession>(IPC_CHANNELS.agent.createSession),
+      getModelSettings: () =>
+        invoke<CodexModelSettingsResponse>(IPC_CHANNELS.agent.getModelSettings),
+      saveModelSettings: (request: CodexModelSettingsSaveRequest) =>
+        invoke<CodexModelSettingsResponse>(IPC_CHANNELS.agent.saveModelSettings, request),
       sendMessage: (request: AgentSendMessageRequest) =>
         invoke<AgentMessage>(IPC_CHANNELS.agent.sendMessage, request)
     }
