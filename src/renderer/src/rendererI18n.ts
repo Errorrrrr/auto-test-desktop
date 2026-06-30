@@ -64,11 +64,12 @@ export function persistLanguage(language: Language, storage?: WritableStorage): 
 const STATUS_LABELS: Record<Language, Record<string, string>> = {
   zh: {
     accepted: '已接受',
-    app_default: '应用默认',
+    app_default: '本地 Codex 默认',
     blocked: '已阻塞',
     busy: '处理中',
     cancelled: '已取消',
     checking: '检查中',
+    codex_config: 'Codex 配置',
     custom: '自定义',
     default: '默认',
     degraded: '部分可用',
@@ -95,7 +96,10 @@ const STATUS_LABELS: Record<Language, Record<string, string>> = {
     unchecked: '未检查',
     unreachable: '不可访问'
   },
-  en: {}
+  en: {
+    app_default: 'local Codex default',
+    codex_config: 'Codex config'
+  }
 };
 
 const EXACT_ZH: Record<string, string> = {
@@ -123,6 +127,7 @@ const EXACT_ZH: Record<string, string> = {
   'Importing through the preload case API.': '正在通过 preload 用例 API 导入。',
   'Local agent adapter is reserved for the next implementation task.':
     '本地 Agent 适配器预留给下一阶段实现。',
+  'Loading local Codex model settings.': '正在读取本地 Codex 模型设置。',
   'Codex CLI test executor is not available.': 'Codex CLI 测试执行器不可用。',
   'Codex CLI is not configured. Configure AGENT_PROVIDER=codex and AGENT_COMMAND=codex.':
     '尚未配置 Codex CLI。请配置 AGENT_PROVIDER=codex 和 AGENT_COMMAND=codex。',
@@ -209,11 +214,7 @@ const EXACT_ZH: Record<string, string> = {
 };
 
 function localizeStatus(status: string, language: Language): string {
-  if (language === 'en') {
-    return status.replace(/_/g, ' ');
-  }
-
-  return STATUS_LABELS.zh[status] ?? status.replace(/_/g, ' ');
+  return STATUS_LABELS[language][status] ?? status.replace(/_/g, ' ');
 }
 
 function localizeKnownDynamicText(value: string, language: Language): string | null {
@@ -420,7 +421,7 @@ export const COPY = {
       inputHelp: '上传 Maestro YAML 或填写自然语言指令；两者都会交给 Codex 通过 Maestro MCP 执行。',
       deleteTaskConfirm: (name: string) => `确认删除测试任务“${name}”？该操作会移除任务工作区数据。`,
       modelNamePlaceholder: '例如 gpt-5',
-      modelSettingsHelp: '保存后的模型只影响新建任务；已创建任务继续使用自己的模型快照。',
+      modelSettingsHelp: '默认选项读取本地 Codex 配置；保存后的覆盖只影响新建任务，已创建任务继续使用自己的模型快照。',
       naturalLanguageLabel: '自然语言',
       promptPlaceholder: '在所选设备上运行已上传的冒烟 flow',
       promptOnlyLimit: '自然语言会直接交给 Codex 执行；目标 App ID 可选，但填写后会作为启动上下文传入。',
@@ -610,7 +611,7 @@ export const COPY = {
       inputHelp: 'Upload a Maestro YAML file or enter a natural-language instruction. Both are delegated to Codex through Maestro MCP.',
       deleteTaskConfirm: (name: string) => `Delete test task "${name}"? This removes its task workspace data.`,
       modelNamePlaceholder: 'Example: gpt-5',
-      modelSettingsHelp: 'Saved models apply only to new tasks. Existing tasks keep their own model snapshot.',
+      modelSettingsHelp: 'Reads the default model from local Codex configuration. Saved overrides apply only to new tasks. Existing tasks keep their own model snapshot.',
       naturalLanguageLabel: 'Natural language',
       promptPlaceholder: 'Run the uploaded smoke flow on the selected device',
       promptOnlyLimit: 'Prompt-only execution is delegated directly to Codex. Target App ID is optional and passed as launch context when present.',

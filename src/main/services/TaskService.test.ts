@@ -134,7 +134,18 @@ async function createTaskServices(options: { naturalLanguageAppId?: string } = {
   const storage = new AppDataStorage(join(rootDir, 'data'));
   const provider = new TaskMaestroProvider();
   const agentProvider = new TaskAgentProvider();
-  const modelSettings = new AgentModelSettingsService({ storage });
+  const modelSettings = new AgentModelSettingsService({
+    codexConfig: {
+      async getConfig() {
+        return {
+          path: 'test-codex-config.toml',
+          status: 'not_found' as const,
+          modelOptions: []
+        };
+      }
+    },
+    storage
+  });
   const agent = new AgentSessionService(agentProvider, { modelSettings });
   const devices = new DeviceService({ provider });
   const cases = new TestCaseService({

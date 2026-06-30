@@ -374,6 +374,16 @@ describe('workbench model snapshots', () => {
     );
     expect(getTaskModelChangeNotice(undefined, modelSettings)).toBeUndefined();
   });
+
+  it('labels app default snapshots as the local Codex default', () => {
+    expect(
+      formatCodexModelSnapshot({
+        capturedAt: '2026-06-30T04:00:00Z',
+        modelName: 'o3',
+        source: 'app_default'
+      })
+    ).toBe('o3 (local Codex default)');
+  });
 });
 
 describe('workbench task refresh', () => {

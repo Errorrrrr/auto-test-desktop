@@ -103,13 +103,34 @@ export interface RuntimeSnapshot {
   };
 }
 
-export type CodexModelSource = 'app_default' | 'preset' | 'custom';
+export type CodexModelSource = 'app_default' | 'codex_config' | 'preset' | 'custom';
+
+export type CodexConfigStatus = 'loaded' | 'not_found' | 'unreadable';
+
+export type CodexConfigModelSource = 'config_default' | 'profile';
 
 export interface CodexModelPreset {
   id: string;
   label: string;
   modelName: string;
   recommended?: boolean;
+}
+
+export interface CodexConfigModelOption {
+  id: string;
+  label: string;
+  modelName: string;
+  source: CodexConfigModelSource;
+  profileName?: string;
+}
+
+export interface CodexConfigSummary {
+  path: string;
+  status: CodexConfigStatus;
+  activeProfile?: string;
+  defaultModelName?: string;
+  modelOptions: CodexConfigModelOption[];
+  warning?: string;
 }
 
 export interface CodexModelSettings {
@@ -137,6 +158,7 @@ export interface CodexModelSettingsResponse {
   settings?: CodexModelSettings;
   effective: CodexModelSnapshot;
   presets: CodexModelPreset[];
+  codexConfig?: CodexConfigSummary;
   defaultModelName: string;
   warning?: string;
 }

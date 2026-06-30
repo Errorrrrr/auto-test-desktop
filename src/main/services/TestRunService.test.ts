@@ -216,7 +216,18 @@ async function createRunService(options: {
     runResult: options.runResult,
     runTest: options.runTest
   });
-  const modelSettings = new AgentModelSettingsService({ storage });
+  const modelSettings = new AgentModelSettingsService({
+    codexConfig: {
+      async getConfig() {
+        return {
+          path: 'test-codex-config.toml',
+          status: 'not_found' as const,
+          modelOptions: []
+        };
+      }
+    },
+    storage
+  });
   const agentService = new AgentSessionService(agentProvider, { modelSettings });
   const deviceService = new DeviceService({ provider });
 

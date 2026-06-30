@@ -460,7 +460,8 @@ export function getRunReadiness(input: {
 }
 
 const CODEX_MODEL_SOURCE_LABELS: Record<CodexModelSnapshot['source'], string> = {
-  app_default: 'app default',
+  app_default: 'local Codex default',
+  codex_config: 'Codex config',
   custom: 'custom',
   preset: 'preset'
 };
@@ -622,6 +623,7 @@ export function getStatusTone(status: ServiceStatus | TestRunStatus | string): s
     status === 'running' ||
     status === 'unchecked' ||
     status === 'app_default' ||
+    status === 'codex_config' ||
     status === 'default'
   ) {
     return 'warning';

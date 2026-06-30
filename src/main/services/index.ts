@@ -8,6 +8,7 @@ import { createRuntimeConfig, type RuntimeEnv } from '../config/runtimeConfig';
 import { AppDataStorage } from '../storage/AppDataStorage';
 import { AgentModelSettingsService } from './AgentModelSettingsService';
 import { AgentSessionService } from './AgentSessionService';
+import { CodexConfigService } from './CodexConfigService';
 import { DeviceService } from './DeviceService';
 import { EnvironmentService } from './EnvironmentService';
 import { ReportService } from './ReportService';
@@ -38,6 +39,9 @@ export function createDefaultServices(options: {
   const config = createRuntimeConfig(options.env, { dataRoot: options.dataRoot });
   const storage = new AppDataStorage(config.dataRoot);
   const modelSettings = new AgentModelSettingsService({
+    codexConfig: new CodexConfigService({
+      env: options.env
+    }),
     defaultModelName: config.agentCodexModelName,
     storage
   });

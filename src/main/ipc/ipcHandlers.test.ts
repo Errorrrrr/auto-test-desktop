@@ -58,7 +58,9 @@ async function createTestServices() {
   return createDefaultServices({
     agentProvider: testAgentProvider,
     dataRoot: join(rootDir, 'data'),
-    env: {},
+    env: {
+      CODEX_HOME: join(rootDir, 'codex')
+    },
     maestroProvider: new StaticMaestroProvider([], {
       status: 'disconnected',
       label: 'Maestro test provider',

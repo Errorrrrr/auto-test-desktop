@@ -30,6 +30,8 @@ import type {
   AgentMessage,
   AgentSession,
   AppAutoTestApi,
+  CodexConfigModelOption,
+  CodexModelSettingsSaveRequest,
   CodexModelSettingsResponse,
   CodexModelSnapshot,
   DeviceInfo,
@@ -116,6 +118,7 @@ type TaskWorkspaceState = {
 
 const DEVICE_START_REFRESH_DELAYS_MS = [1200, 2500, 5000];
 const APP_DEFAULT_MODEL_OPTION = '__app_default__';
+const CODEX_CONFIG_MODEL_OPTION_PREFIX = '__codex_config__:';
 
 type MenuPage = 'overview' | 'task' | 'devices' | 'viewer' | 'settings';
 
@@ -130,6 +133,104 @@ function getCodexPresetById(presetId: string | undefined) {
 
 function getCodexPresetByModelName(modelName: string | undefined) {
   return CODEX_MODEL_PRESETS.find((preset) => preset.modelName === modelName);
+}
+
+function getCodexConfigOptionValue(option: CodexConfigModelOption): string {
+  return `${CODEX_CONFIG_MODEL_OPTION_PREFIX}${option.id}`;
+}
+
+function getSelectableCodexConfigOptions(
+  modelSettings: CodexModelSettingsResponse | null
+): CodexConfigModelOption[] {
+  const defaultModelName = modelSettings?.codexConfig?.defaultModelName;
+
+  return (modelSettings?.codexConfig?.modelOptions ?? []).filter(
+    (option) => option.source !== 'config_default' || option.modelName !== defaultModelName
+  );
+}
+
+function findCodexConfigOption(
+  modelSettings: CodexModelSettingsResponse | null,
+  value: string
+): CodexConfigModelOption | undefined {
+  if (!value.startsWith(CODEX_CONFIG_MODEL_OPTION_PREFIX)) {
+    return undefined;
+  }
+
+  const optionId = value.slice(CODEX_CONFIG_MODEL_OPTION_PREFIX.length);
+
+  return getSelectableCodexConfigOptions(modelSettings).find((option) => option.id === optionId);
+}
+
+function findCodexConfigOptionByModelName(
+  modelSettings: CodexModelSettingsResponse,
+  modelName: string
+): CodexConfigModelOption | undefined {
+  return getSelectableCodexConfigOptions(modelSettings).find((option) => option.modelName === modelName);
+}
+
+export function getModelSettingsDraftPresetId(nextSettings: CodexModelSettingsResponse): string {
+  if (
+    nextSettings.effective.source === 'app_default' ||
+    (nextSettings.effective.source === 'codex_config' && nextSettings.settings?.source !== 'codex_config')
+  ) {
+    return APP_DEFAULT_MODEL_OPTION;
+  }
+
+  if (nextSettings.effective.source === 'codex_config') {
+    const codexConfigOption = findCodexConfigOptionByModelName(nextSettings, nextSettings.effective.modelName);
+
+    return codexConfigOption ? getCodexConfigOptionValue(codexConfigOption) : '';
+  }
+
+  if (nextSettings.effective.source === 'preset') {
+    return (
+      nextSettings.effective.presetId ??
+      nextSettings.presets.find((preset) => preset.modelName === nextSettings.effective.modelName)?.id ??
+      ''
+    );
+  }
+
+  return '';
+}
+
+export function createModelSettingsSaveRequest(
+  modelSettings: CodexModelSettingsResponse | null,
+  draftPresetId: string,
+  draftModelName: string
+): CodexModelSettingsSaveRequest {
+  if (draftPresetId === APP_DEFAULT_MODEL_OPTION) {
+    return {
+      modelName: modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME,
+      source: 'app_default'
+    };
+  }
+
+  const codexConfigOption = findCodexConfigOption(modelSettings, draftPresetId);
+
+  if (codexConfigOption) {
+    return {
+      modelName: codexConfigOption.modelName,
+      source: 'codex_config'
+    };
+  }
+
+  const selectedPreset = (modelSettings?.presets ?? CODEX_MODEL_PRESETS).find(
+    (preset) => preset.id === draftPresetId
+  );
+
+  if (selectedPreset) {
+    return {
+      modelName: selectedPreset.modelName,
+      presetId: selectedPreset.id,
+      source: 'preset'
+    };
+  }
+
+  return {
+    modelName: draftModelName.trim(),
+    source: 'custom'
+  };
 }
 
 function createModelSnapshot(
@@ -169,9 +270,15 @@ function createBrowserFallbackModelSettings(
             ...(presetId ? { presetId } : {}),
             updatedAt
           }
-        }),
+    }),
     effective: createModelSnapshot(modelName, source, presetId),
     presets: CODEX_MODEL_PRESETS,
+    codexConfig: {
+      path: '',
+      status: 'not_found',
+      modelOptions: [],
+      warning: 'Codex model settings require the Electron main process.'
+    },
     warning: 'Codex model settings require the Electron main process.'
   };
 }
@@ -1540,9 +1647,16 @@ export function ModelSettingsPanel({
 }): ReactElement {
   const copy = COPY[language];
   const activeSnapshot = modelSettings?.effective;
+  const builtinPresets = modelSettings?.presets ?? CODEX_MODEL_PRESETS;
+  const codexConfigOptions = getSelectableCodexConfigOptions(modelSettings);
   const activeModel = activeSnapshot
     ? formatCodexModelSnapshot(activeSnapshot)
     : copy.runtime.notLoaded;
+  const controlsDisabled = !modelSettings || saveState.status === 'busy';
+  const draftModelLocked =
+    draftPresetId === APP_DEFAULT_MODEL_OPTION ||
+    draftPresetId.startsWith(CODEX_CONFIG_MODEL_OPTION_PREFIX) ||
+    builtinPresets.some((preset) => preset.id === draftPresetId);
   const saveDetail =
     saveState.detail ||
     modelSettings?.warning ||
@@ -1558,7 +1672,10 @@ export function ModelSettingsPanel({
             <Settings2 size={20} aria-hidden="true" />
             <h2>{copy.titles.modelSettings}</h2>
           </div>
-          <StatusPill status={activeSnapshot?.source ?? 'not_configured'} language={language} />
+          <StatusPill
+            status={saveState.status === 'busy' ? 'busy' : activeSnapshot?.source ?? 'not_configured'}
+            language={language}
+          />
         </div>
 
         <p className="muted">{copy.copy.modelSettingsHelp}</p>
@@ -1582,13 +1699,19 @@ export function ModelSettingsPanel({
             id="codex-model-preset"
             className="text-input"
             value={draftPresetId}
+            disabled={controlsDisabled}
             onChange={(event) => onDraftPresetChange(event.target.value)}
           >
             <option value={APP_DEFAULT_MODEL_OPTION}>
               {formatStatusLabel('app_default', language)} ({modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME})
             </option>
+            {codexConfigOptions.map((option) => (
+              <option key={option.id} value={getCodexConfigOptionValue(option)}>
+                {option.label} ({option.modelName})
+              </option>
+            ))}
             <option value="">{copy.model.customOption}</option>
-            {(modelSettings?.presets ?? CODEX_MODEL_PRESETS).map((preset) => (
+            {builtinPresets.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.label} ({preset.modelName})
               </option>
@@ -1602,13 +1725,13 @@ export function ModelSettingsPanel({
             id="codex-model-name"
             className="text-input"
             value={draftModelName}
-            disabled={draftPresetId === APP_DEFAULT_MODEL_OPTION}
+            disabled={controlsDisabled || draftModelLocked}
             onChange={(event) => onDraftModelNameChange(event.target.value)}
             placeholder={copy.copy.modelNamePlaceholder}
             spellCheck={false}
           />
 
-          <button className="primary-button" disabled={saveState.status === 'busy'} type="submit">
+          <button className="primary-button" disabled={controlsDisabled} type="submit">
             {saveState.status === 'busy' ? (
               <Loader2 className="spin" size={18} aria-hidden="true" />
             ) : (
@@ -1647,8 +1770,8 @@ export function App(): ReactElement {
   const [modelDraftName, setModelDraftName] = useState(DEFAULT_CODEX_MODEL_NAME);
   const [modelDraftPresetId, setModelDraftPresetId] = useState(APP_DEFAULT_MODEL_OPTION);
   const [modelSaveAction, setModelSaveAction] = useState<RunActionState>({
-    status: 'idle',
-    detail: 'Codex model settings are not configured.'
+    status: 'busy',
+    detail: 'Loading local Codex model settings.'
   });
   const [deletingTaskId, setDeletingTaskId] = useState('');
   const [agentSession] = useState<AgentSession | null>(null);
@@ -1783,26 +1906,10 @@ export function App(): ReactElement {
     return Boolean(task && !isActiveTaskStatus(task.status));
   }
 
-  function getPresetIdForModelSettings(nextSettings: CodexModelSettingsResponse): string {
-    if (nextSettings.effective.source === 'app_default') {
-      return APP_DEFAULT_MODEL_OPTION;
-    }
-
-    if (nextSettings.effective.source === 'preset') {
-      return (
-        nextSettings.effective.presetId ??
-        nextSettings.presets.find((preset) => preset.modelName === nextSettings.effective.modelName)?.id ??
-        ''
-      );
-    }
-
-    return '';
-  }
-
   function applyModelSettingsResponse(nextSettings: CodexModelSettingsResponse): void {
     setModelSettings(nextSettings);
     setModelDraftName(nextSettings.effective.modelName);
-    setModelDraftPresetId(getPresetIdForModelSettings(nextSettings));
+    setModelDraftPresetId(getModelSettingsDraftPresetId(nextSettings));
   }
 
   function mergeTaskWorkspaceState(
@@ -1903,6 +2010,13 @@ export function App(): ReactElement {
       return;
     }
 
+    const codexConfigOption = findCodexConfigOption(modelSettings, presetId);
+
+    if (codexConfigOption) {
+      setModelDraftName(codexConfigOption.modelName);
+      return;
+    }
+
     const preset = (modelSettings?.presets ?? CODEX_MODEL_PRESETS).find(
       (candidate) => candidate.id === presetId
     );
@@ -1921,26 +2035,8 @@ export function App(): ReactElement {
     });
 
     try {
-      const selectedPreset = (modelSettings?.presets ?? CODEX_MODEL_PRESETS).find(
-        (preset) => preset.id === modelDraftPresetId
-      );
-      const modelName = modelDraftName.trim();
       const nextSettings = await api.agent.saveModelSettings(
-        modelDraftPresetId === APP_DEFAULT_MODEL_OPTION
-          ? {
-              modelName: modelSettings?.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME,
-              source: 'app_default'
-            }
-          : selectedPreset
-            ? {
-                modelName: selectedPreset.modelName,
-                presetId: selectedPreset.id,
-                source: 'preset'
-              }
-            : {
-                modelName,
-                source: 'custom'
-              }
+        createModelSettingsSaveRequest(modelSettings, modelDraftPresetId, modelDraftName)
       );
 
       applyModelSettingsResponse(nextSettings);
@@ -2097,6 +2193,7 @@ export function App(): ReactElement {
 
   async function refreshRuntime(): Promise<void> {
     setRuntimeState({ status: 'busy', detail: 'Refreshing local runtime status.' });
+    setModelSaveAction({ status: 'busy', detail: 'Loading local Codex model settings.' });
 
     try {
       const [nextEnvironment, nextDevices, nextViewerConfig, tasks, nextModelSettings] = await Promise.all([
@@ -2114,6 +2211,11 @@ export function App(): ReactElement {
       setViewerUrl(nextViewerConfig.url);
       setTasks(tasks);
       applyModelSettingsResponse(nextModelSettings);
+      setModelSaveAction(
+        nextModelSettings.warning
+          ? { status: 'error', detail: nextModelSettings.warning }
+          : { status: 'idle', detail: '' }
+      );
       setSelectedTaskId(nextTask?.id ?? '');
       hydrateTaskWorkspaces(tasks, nextTask, nextDevices);
       if (nextTask) {
@@ -2127,6 +2229,10 @@ export function App(): ReactElement {
         detail: `Last refreshed ${formatDateTime(nextEnvironment.generatedAt, 'en')}.`
       });
     } catch (error) {
+      setModelSaveAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
       setRuntimeState({
         status: 'error',
         detail: getErrorMessage(error)

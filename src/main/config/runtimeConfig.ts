@@ -16,6 +16,7 @@ export interface RuntimeEnv {
   ANDROID_HOME?: string;
   ANDROID_EMULATOR_PATH?: string;
   ANDROID_SDK_ROOT?: string;
+  CODEX_HOME?: string;
   MAESTRO_CLI_PATH?: string;
   MAESTRO_APP_ID?: string;
   MAESTRO_PROVIDER?: string;

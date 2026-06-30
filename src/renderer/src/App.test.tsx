@@ -8,7 +8,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { CodexModelSettingsResponse, DeviceInfo, TaskReport, TestTask } from '../../shared/types';
 import {
   App,
+  createModelSettingsSaveRequest,
   DeviceListPanel,
+  getModelSettingsDraftPresetId,
   ModelSettingsPanel,
   ReportPanel,
   TaskWorkspacePanel,
@@ -225,7 +227,7 @@ describe('app shell scrolling', () => {
     expect(html).toContain('data-page="settings"');
     expect(html).toContain('Codex Model Settings');
     expect(html).toContain('gpt-5-mini (GPT-5 mini)');
-    expect(html).toContain('app default (gpt-5)');
+    expect(html).toContain('local Codex default (gpt-5)');
     expect(html).toContain('GPT-5 mini (gpt-5-mini)');
   });
 
@@ -288,11 +290,180 @@ describe('workbench panels', () => {
 
     expect(html).toContain('data-page="settings"');
     expect(html).toContain('Codex Model Settings');
-    expect(html).toContain('Saved models apply only to new tasks');
-    expect(html).toContain('app default (gpt-5)');
+    expect(html).toContain('Saved overrides apply only to new tasks');
+    expect(html).toContain('local Codex default (gpt-5)');
     expect(html).toContain('GPT-5 mini (gpt-5-mini)');
     expect(html).toContain('value="gpt-5-mini" selected=""');
     expect(html).toContain('Codex model settings saved');
+  });
+
+  it('labels the app default as the local Codex default model', () => {
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="o3"
+        draftPresetId="__app_default__"
+        language="en"
+        modelSettings={{
+          defaultModelName: 'o3',
+          effective: {
+            capturedAt: '2026-06-30T04:00:00Z',
+            modelName: 'o3',
+            source: 'app_default'
+          },
+          presets: modelSettings.presets
+        }}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'idle',
+          detail: ''
+        }}
+      />
+    );
+
+    expect(html).toContain('o3 (local Codex default)');
+    expect(html).toContain('local Codex default (o3)');
+    expect(html).toContain('Reads the default model from local Codex configuration');
+  });
+
+  it('renders local Codex config models as selectable options', () => {
+    const settings: CodexModelSettingsResponse = {
+      defaultModelName: 'o3',
+      effective: {
+        capturedAt: '2026-06-30T04:00:00Z',
+        modelName: 'o3',
+        source: 'codex_config'
+      },
+      presets: modelSettings.presets,
+      codexConfig: {
+        path: '/Users/example/.codex/config.toml',
+        status: 'loaded',
+        activeProfile: 'work',
+        defaultModelName: 'o3',
+        modelOptions: [
+          {
+            id: 'default',
+            label: 'Codex default',
+            modelName: 'o3',
+            source: 'config_default'
+          },
+          {
+            id: 'profile-work',
+            label: 'Work profile',
+            modelName: 'gpt-5-codex',
+            profileName: 'work',
+            source: 'profile'
+          }
+        ]
+      }
+    };
+
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="o3"
+        draftPresetId="__app_default__"
+        language="en"
+        modelSettings={settings}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'idle',
+          detail: ''
+        }}
+      />
+    );
+
+    expect(html).toContain('o3 (Codex config)');
+    expect(html).toContain('local Codex default (o3)');
+    expect(html).not.toContain('Codex default (o3)</option><option value="__codex_config__:default"');
+    expect(html).toContain('Work profile (gpt-5-codex)');
+  });
+
+  it('disables model controls while local Codex settings are loading', () => {
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="gpt-5"
+        draftPresetId="__app_default__"
+        language="en"
+        modelSettings={null}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'busy',
+          detail: 'Loading local Codex model settings.'
+        }}
+      />
+    );
+
+    expect(html).toContain('Loading local Codex model settings.');
+    expect(html).toMatch(/id="codex-model-preset"[^>]*disabled=""/);
+    expect(html).toMatch(/id="codex-model-name"[^>]*disabled=""/);
+    expect(html).toMatch(/<button class="primary-button" disabled="" type="submit">/);
+  });
+
+  it('keeps model controls disabled when local Codex settings fail to load', () => {
+    const html = renderToStaticMarkup(
+      <ModelSettingsPanel
+        draftModelName="gpt-5"
+        draftPresetId="__app_default__"
+        language="en"
+        modelSettings={null}
+        onDraftModelNameChange={() => undefined}
+        onDraftPresetChange={() => undefined}
+        onSave={() => undefined}
+        saveState={{
+          status: 'error',
+          detail: 'Unable to read local Codex configuration.'
+        }}
+      />
+    );
+
+    expect(html).toContain('class="validation-message"');
+    expect(html).toContain('Unable to read local Codex configuration.');
+    expect(html).toMatch(/id="codex-model-preset"[^>]*disabled=""/);
+    expect(html).toMatch(/id="codex-model-name"[^>]*disabled=""/);
+    expect(html).toMatch(/<button class="primary-button" disabled="" type="submit">/);
+  });
+
+  it('maps local Codex config selections to codex_config save requests', () => {
+    const settings: CodexModelSettingsResponse = {
+      defaultModelName: 'o3',
+      effective: {
+        capturedAt: '2026-06-30T04:00:00Z',
+        modelName: 'gpt-5-codex',
+        source: 'codex_config'
+      },
+      presets: modelSettings.presets,
+      settings: {
+        modelName: 'gpt-5-codex',
+        source: 'codex_config',
+        updatedAt: '2026-06-30T04:00:00Z'
+      },
+      codexConfig: {
+        path: '/Users/example/.codex/config.toml',
+        status: 'loaded',
+        defaultModelName: 'o3',
+        modelOptions: [
+          {
+            id: 'profile-work',
+            label: 'Work profile',
+            modelName: 'gpt-5-codex',
+            profileName: 'work',
+            source: 'profile'
+          }
+        ]
+      }
+    };
+    const draftPresetId = getModelSettingsDraftPresetId(settings);
+
+    expect(draftPresetId).toBe('__codex_config__:profile-work');
+    expect(createModelSettingsSaveRequest(settings, draftPresetId, 'ignored')).toEqual({
+      modelName: 'gpt-5-codex',
+      source: 'codex_config'
+    });
   });
 
   it('renders the task menu as a list plus selected detail workspace', () => {

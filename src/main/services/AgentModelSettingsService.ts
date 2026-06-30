@@ -5,6 +5,7 @@ import {
   DEFAULT_CODEX_MODEL_NAME
 } from '../../shared/codexModels';
 import type {
+  CodexConfigSummary,
   CodexModelPreset,
   CodexModelSettings,
   CodexModelSettingsResponse,
@@ -13,6 +14,7 @@ import type {
 } from '../../shared/types';
 import type { AppDataStorage } from '../storage/AppDataStorage';
 import { AppError } from './AppError';
+import { CodexConfigService } from './CodexConfigService';
 import { requireRecord } from './validation';
 
 const CODEX_MODEL_NAME_PATTERN = /^[A-Za-z0-9._:/-]+$/;
@@ -24,17 +26,24 @@ interface StoredSettingsResult {
 }
 
 interface AgentModelSettingsServiceOptions {
+  codexConfig?: {
+    getConfig(): Promise<CodexConfigSummary>;
+  };
   defaultModelName?: string;
   presets?: CodexModelPreset[];
   storage: AppDataStorage;
 }
 
 export class AgentModelSettingsService {
+  private readonly codexConfig: {
+    getConfig(): Promise<CodexConfigSummary>;
+  };
   private readonly defaultModelName: string;
   private readonly presets: CodexModelPreset[];
   private readonly storage: AppDataStorage;
 
   constructor(options: AgentModelSettingsServiceOptions) {
+    this.codexConfig = options.codexConfig ?? new CodexConfigService();
     this.defaultModelName = validateModelName(
       options.defaultModelName ?? DEFAULT_CODEX_MODEL_NAME,
       'Default Codex model'
@@ -45,18 +54,26 @@ export class AgentModelSettingsService {
   }
 
   async getModelSettings(): Promise<CodexModelSettingsResponse> {
-    const stored = await this.readStoredSettings();
+    const [stored, codexConfig] = await Promise.all([
+      this.readStoredSettings(),
+      this.codexConfig.getConfig()
+    ]);
 
-    return this.buildResponse(stored);
+    return this.buildResponse(stored, codexConfig);
   }
 
   async saveModelSettings(request: unknown): Promise<CodexModelSettingsResponse> {
     const settings = this.parseSaveRequest(request);
+    const codexConfig = await this.codexConfig.getConfig();
 
     if (settings.source === 'app_default') {
       await this.clearStoredSettings();
 
-      return this.buildResponse();
+      return this.buildResponse({}, codexConfig);
+    }
+
+    if (settings.source === 'codex_config') {
+      assertCodexConfigModelAvailable(settings.modelName, codexConfig);
     }
 
     try {
@@ -71,7 +88,7 @@ export class AgentModelSettingsService {
 
     return this.buildResponse({
       settings
-    });
+    }, codexConfig);
   }
 
   async getEffectiveSnapshot(): Promise<CodexModelSnapshot> {
@@ -96,13 +113,19 @@ export class AgentModelSettingsService {
     }
   }
 
-  private buildResponse(stored: StoredSettingsResult = {}): CodexModelSettingsResponse {
+  private buildResponse(
+    stored: StoredSettingsResult = {},
+    codexConfig: CodexConfigSummary
+  ): CodexModelSettingsResponse {
+    const warning = buildSettingsWarning(stored, codexConfig);
+
     return {
       ...(stored.settings ? { settings: stored.settings } : {}),
-      effective: this.toSnapshot(stored.settings),
+      effective: this.toSnapshot(stored.settings, codexConfig),
       presets: this.presets.map((preset) => ({ ...preset })),
-      defaultModelName: this.defaultModelName,
-      ...(stored.warning ? { warning: stored.warning } : {})
+      codexConfig,
+      defaultModelName: codexConfig.defaultModelName ?? this.defaultModelName,
+      ...(warning ? { warning } : {})
     };
   }
 
@@ -157,7 +180,10 @@ export class AgentModelSettingsService {
     });
   }
 
-  private toSnapshot(settings: CodexModelSettings | undefined): CodexModelSnapshot {
+  private toSnapshot(
+    settings: CodexModelSettings | undefined,
+    codexConfig: CodexConfigSummary
+  ): CodexModelSnapshot {
     const capturedAt = new Date().toISOString();
 
     if (settings) {
@@ -167,6 +193,14 @@ export class AgentModelSettingsService {
         ...(settings.presetId ? { presetId: settings.presetId } : {}),
         capturedAt,
         settingsUpdatedAt: settings.updatedAt
+      };
+    }
+
+    if (codexConfig.defaultModelName) {
+      return {
+        modelName: codexConfig.defaultModelName,
+        source: 'codex_config',
+        capturedAt
       };
     }
 
@@ -210,6 +244,14 @@ function normalizeSettings(options: {
     return {
       modelName: options.modelName,
       source: 'app_default',
+      updatedAt: options.updatedAt
+    };
+  }
+
+  if (options.source === 'codex_config') {
+    return {
+      modelName: options.modelName,
+      source: 'codex_config',
       updatedAt: options.updatedAt
     };
   }
@@ -260,11 +302,14 @@ function validateModelName(value: unknown, label: string): string {
 }
 
 function parseSource(value: unknown): CodexModelSource {
-  if (value === 'app_default' || value === 'preset' || value === 'custom') {
+  if (value === 'app_default' || value === 'codex_config' || value === 'preset' || value === 'custom') {
     return value;
   }
 
-  throw new AppError('CODEX_MODEL_INVALID', 'Codex model source must be app_default, preset, or custom.');
+  throw new AppError(
+    'CODEX_MODEL_INVALID',
+    'Codex model source must be app_default, codex_config, preset, or custom.'
+  );
 }
 
 function parseOptionalString(value: unknown): string | undefined {
@@ -294,4 +339,36 @@ function isNotFoundError(error: unknown): boolean {
     'code' in error &&
     (error as { code?: string }).code === 'ENOENT'
   );
+}
+
+function assertCodexConfigModelAvailable(
+  modelName: string,
+  codexConfig: CodexConfigSummary
+): void {
+  const availableModels = new Set([
+    codexConfig.defaultModelName,
+    ...codexConfig.modelOptions.map((option) => option.modelName)
+  ].filter((value): value is string => Boolean(value)));
+
+  if (codexConfig.status === 'loaded' && availableModels.has(modelName)) {
+    return;
+  }
+
+  throw new AppError(
+    'CODEX_MODEL_INVALID',
+    'Selected Codex model is not available from the local Codex config.'
+  );
+}
+
+function buildSettingsWarning(
+  stored: StoredSettingsResult,
+  codexConfig: CodexConfigSummary
+): string | undefined {
+  const shouldSurfaceCodexConfigWarning =
+    !stored.settings || stored.settings.source === 'app_default' || stored.settings.source === 'codex_config';
+
+  return [
+    stored.warning,
+    shouldSurfaceCodexConfigWarning ? codexConfig.warning : undefined
+  ].filter(Boolean).join(' ') || undefined;
 }

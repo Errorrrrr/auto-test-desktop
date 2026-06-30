@@ -127,7 +127,18 @@ async function createRunAndReportServices(): Promise<{
   const devices = new DeviceService({
     provider: new SucceedingMaestroProvider()
   });
-  const modelSettings = new AgentModelSettingsService({ storage });
+  const modelSettings = new AgentModelSettingsService({
+    codexConfig: {
+      async getConfig() {
+        return {
+          path: 'test-codex-config.toml',
+          status: 'not_found' as const,
+          modelOptions: []
+        };
+      }
+    },
+    storage
+  });
   const agent = new AgentSessionService(testAgentProvider, { modelSettings });
 
   await storage.getTestCaseStore().upsert(importedCase);

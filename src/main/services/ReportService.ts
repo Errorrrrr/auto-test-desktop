@@ -42,6 +42,7 @@ const TASK_STATUS_CONCLUSION: Record<TestTaskStatus, string> = {
 
 const MODEL_SOURCE_LABELS: Record<CodexModelSnapshot['source'], string> = {
   app_default: 'app default',
+  codex_config: 'Codex config',
   custom: 'custom',
   preset: 'preset'
 };
