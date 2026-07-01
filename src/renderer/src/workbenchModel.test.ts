@@ -24,6 +24,7 @@ import {
   getRunReadiness,
   getTaskModelChangeNotice,
   getSelectedTaskAfterRefresh,
+  getTaskProgress,
   hasStartedDeviceAppeared,
   isStartableDevice,
   isStoppableDevice,
@@ -469,6 +470,15 @@ describe('workbench task refresh', () => {
 });
 
 describe('workbench task run log summaries', () => {
+  it('maps task status into a stable workspace progress value', () => {
+    expect(getTaskProgress('draft')).toBe(10);
+    expect(getTaskProgress('ready')).toBe(35);
+    expect(getTaskProgress('queued')).toBe(55);
+    expect(getTaskProgress('running')).toBe(75);
+    expect(getTaskProgress('succeeded')).toBe(100);
+    expect(getTaskProgress('failed')).toBe(100);
+  });
+
   it('groups flat task log entries into newest-first per-run summaries', () => {
     const summaries = buildTaskRunLogSummaries(createTask({
       latestRunId: 'run-2',
@@ -579,6 +589,62 @@ describe('workbench task run log summaries', () => {
       runId: 'run-1',
       status: 'failed'
     });
+  });
+
+  it('hides runs whose log entries have been deleted from the task workspace history', () => {
+    const summaries = buildTaskRunLogSummaries(createTask({
+      latestRunId: 'run-2',
+      runIds: ['run-1', 'run-2'],
+      logs: [
+        {
+          id: 'log-run-2-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T04:00:00.000Z',
+          runId: 'run-2',
+          status: 'queued'
+        }
+      ]
+    }));
+
+    expect(summaries.map((summary) => summary.runId)).toEqual(['run-2']);
+  });
+
+  it('filters deleted run ids from task workspace history when stale logs are still present', () => {
+    const summaries = buildTaskRunLogSummaries(createTask({
+      deletedLogRunIds: ['run-1'],
+      latestRunId: 'run-2',
+      runIds: ['run-1', 'run-2'],
+      logs: [
+        {
+          id: 'log-run-1-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T03:00:00.000Z',
+          runId: 'run-1',
+          status: 'queued'
+        },
+        {
+          id: 'log-run-1-complete',
+          kind: 'run_completed',
+          message: 'Run finished.',
+          createdAt: '2026-06-25T03:05:00.000Z',
+          runId: 'run-1',
+          status: 'succeeded'
+        },
+        {
+          id: 'log-run-2-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T04:00:00.000Z',
+          runId: 'run-2',
+          status: 'queued'
+        }
+      ]
+    }));
+
+    expect(summaries.map((summary) => summary.runId)).toEqual(['run-2']);
+    expect(summaries[0]?.entries.map((entry) => entry.runId)).toEqual(['run-2']);
   });
 });
 

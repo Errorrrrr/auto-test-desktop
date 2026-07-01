@@ -29,6 +29,7 @@ export function createIpcHandlers(services: AppAutoTestServices): IpcHandlers {
     [IPC_CHANNELS.tasks.importCase]: (payload: unknown) => services.tasks.importCase(payload),
     [IPC_CHANNELS.tasks.start]: (payload: unknown) => services.tasks.start(payload),
     [IPC_CHANNELS.tasks.cancel]: (payload: unknown) => services.tasks.cancel(payload),
+    [IPC_CHANNELS.tasks.deleteLog]: (payload: unknown) => services.tasks.deleteLog(payload),
     [IPC_CHANNELS.tasks.getReport]: (payload: unknown) => services.tasks.getReport(payload),
     [IPC_CHANNELS.tasks.exportReport]: (payload: unknown) => services.tasks.exportReport(payload),
     [IPC_CHANNELS.agent.createSession]: () => services.agent.createSession(),

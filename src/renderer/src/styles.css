@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color: #18212f;
   background: #f5f7fa;
@@ -582,6 +584,14 @@ h2 {
   border-top: 1px solid #e3e9f2;
 }
 
+.section-kicker {
+  display: block;
+  margin-top: 3px;
+  color: #627084;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .field-label {
   color: #39475a;
   font-size: 13px;
@@ -860,6 +870,13 @@ h2 {
   padding: 0 12px 12px;
 }
 
+.task-run-log-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
 .device-row input {
   flex: 0 0 auto;
 }
@@ -1100,6 +1117,90 @@ h2 {
   gap: 4px;
 }
 
+.task-progress-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.task-progress-bar {
+  height: 8px;
+}
+
+.task-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  color: #627084;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.task-progress-step.complete {
+  border-color: #b7dccf;
+  color: #14532d;
+  background: #f2fbf7;
+}
+
+.task-progress-step span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.live-log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.live-log-list li {
+  display: grid;
+  gap: 4px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-left: 3px solid #256d64;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.live-log-list strong,
+.live-log-list small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.live-log-list small {
+  color: #627084;
+  font-size: 12px;
+}
+
+.report-heading-copy {
+  align-items: flex-start;
+}
+
 .message-row strong {
   color: #39475a;
   font-size: 12px;
@@ -1246,6 +1347,11 @@ h2 {
 
   .metric-grid,
   .metric-grid.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .task-progress-steps,
+  .task-run-log-shell {
     grid-template-columns: 1fr;
   }
 }

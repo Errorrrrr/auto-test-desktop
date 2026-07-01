@@ -52,6 +52,7 @@ describe('preload appAutoTest API', () => {
     await api.tasks.start({ taskId: 'task-1', deviceId: 'android-1' });
     await api.tasks.cancel('task-1');
     await api.tasks.delete('task-1');
+    await api.tasks.deleteLog({ taskId: 'task-1', runId: 'run-1' });
     await api.tasks.getReport('task-1');
     await api.tasks.exportReport({ taskId: 'task-1', format: 'markdown' });
     await api.agent.createSession();
@@ -121,6 +122,10 @@ describe('preload appAutoTest API', () => {
       {
         channel: IPC_CHANNELS.tasks.delete,
         payload: { taskId: 'task-1' }
+      },
+      {
+        channel: IPC_CHANNELS.tasks.deleteLog,
+        payload: { taskId: 'task-1', runId: 'run-1' }
       },
       {
         channel: IPC_CHANNELS.tasks.getReport,

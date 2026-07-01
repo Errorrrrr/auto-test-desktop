@@ -162,6 +162,7 @@ describe('main process IPC handlers', () => {
         IPC_CHANNELS.tasks.cancel,
         IPC_CHANNELS.tasks.create,
         IPC_CHANNELS.tasks.delete,
+        IPC_CHANNELS.tasks.deleteLog,
         IPC_CHANNELS.tasks.exportReport,
         IPC_CHANNELS.tasks.get,
         IPC_CHANNELS.tasks.getReport,
@@ -221,5 +222,23 @@ describe('main process IPC handlers', () => {
       name: 'Smoke task'
     });
     await expect(invokeIpcHandler(handlers, IPC_CHANNELS.tasks.list)).resolves.toEqual([]);
+  });
+
+  it('routes task run log deletion through the task service', async () => {
+    const handlers = createIpcHandlers(await createTestServices());
+    const task = await invokeIpcHandler(handlers, IPC_CHANNELS.tasks.create, {
+      name: 'Log cleanup task'
+    });
+    const taskId = (task as { id: string }).id;
+
+    await expect(
+      invokeIpcHandler(handlers, IPC_CHANNELS.tasks.deleteLog, {
+        taskId,
+        runId: 'run-missing'
+      })
+    ).resolves.toMatchObject({
+      id: taskId,
+      name: 'Log cleanup task'
+    });
   });
 });

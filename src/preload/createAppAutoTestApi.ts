@@ -12,6 +12,7 @@ import type {
   EnvironmentStatus,
   ReportExportRequest,
   TaskCreateRequest,
+  TaskDeleteLogRequest,
   TaskImportCaseRequest,
   TaskReport,
   TaskReportExportRequest,
@@ -68,6 +69,8 @@ export function createAppAutoTestApi(invoke: IpcInvoker): AppAutoTestApi {
         invoke<TestTask>(IPC_CHANNELS.tasks.importCase, request),
       start: (request: TaskStartRequest) => invoke<TestTask>(IPC_CHANNELS.tasks.start, request),
       cancel: (taskId: string) => invoke<TestTask>(IPC_CHANNELS.tasks.cancel, { taskId }),
+      deleteLog: (request: TaskDeleteLogRequest) =>
+        invoke<TestTask>(IPC_CHANNELS.tasks.deleteLog, request),
       getReport: (taskId: string) => invoke<TaskReport>(IPC_CHANNELS.tasks.getReport, { taskId }),
       exportReport: (request: TaskReportExportRequest) =>
         invoke<TaskReport>(IPC_CHANNELS.tasks.exportReport, request)

@@ -141,6 +141,22 @@ export function getRunActionStatusForTaskStatus(status: TestTaskStatus): AsyncSt
   return 'idle';
 }
 
+export function getTaskProgress(status: TestTaskStatus): number {
+  const progressByStatus: Record<TestTaskStatus, number> = {
+    blocked: 100,
+    cancelled: 100,
+    draft: 10,
+    failed: 100,
+    queued: 55,
+    ready: 35,
+    running: 75,
+    succeeded: 100,
+    timeout: 100
+  };
+
+  return progressByStatus[status];
+}
+
 export function isStoppableDevice(device: DeviceInfo): boolean {
   return isVirtualDevice(device) && device.connected;
 }
@@ -347,14 +363,21 @@ export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSumma
     return [];
   }
 
-  const logs = task.logs ?? [];
+  const deletedLogRunIds = new Set(task.deletedLogRunIds ?? []);
+  const logs = (task.logs ?? []).filter((entry) => !entry.runId || !deletedLogRunIds.has(entry.runId));
   const runIds: string[] = [];
 
   for (const runId of task.runIds ?? []) {
+    if (deletedLogRunIds.has(runId)) {
+      continue;
+    }
+
     addUniqueRunId(runIds, runId);
   }
 
-  addUniqueRunId(runIds, task.latestRunId);
+  if (!task.latestRunId || !deletedLogRunIds.has(task.latestRunId)) {
+    addUniqueRunId(runIds, task.latestRunId);
+  }
 
   for (const entry of logs) {
     addUniqueRunId(runIds, entry.runId);
@@ -389,6 +412,7 @@ export function buildTaskRunLogSummaries(task: TestTask | null): TaskRunLogSumma
         detailCount: entries.length
       };
     })
+    .filter((summary) => summary.entries.length > 0)
     .sort((left, right) => {
       const timeDiff = getSortableTime(right.updatedAt) - getSortableTime(left.updatedAt);
 

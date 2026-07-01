@@ -73,6 +73,7 @@ import {
   getSelectedTaskAfterRefresh,
   getSelectedDevice,
   getStatusTone,
+  getTaskProgress,
   hasStartedDeviceAppeared,
   isExecutableDevice,
   isStartableDevice,
@@ -86,6 +87,8 @@ import {
   validateViewerUrl
 } from './workbenchModel';
 import type { RunReadiness } from './workbenchModel';
+import { Button } from './components/ui/button';
+import { Progress } from './components/ui/progress';
 
 type ViewerOpener = (url: string, target: string, features: string) => Window | null;
 
@@ -556,6 +559,11 @@ function createBrowserFallbackApi(): AppAutoTestApi {
           id: taskId,
           status: 'cancelled',
           failureReason: 'Browser fallback cannot cancel local task execution.'
+        }),
+      deleteLog: async (request) =>
+        createBrowserFallbackTask({
+          id: request.taskId,
+          status: 'ready'
         }),
       getReport: async (taskId) =>
         createBrowserFallbackTaskReport(
@@ -1045,7 +1053,7 @@ export function ReportPanel({
       <article className={framed ? 'panel' : ''} id="report">
         <div className="panel-heading">
           <FileText size={20} aria-hidden="true" />
-          <h2>{copy.titles.report}</h2>
+          <h2>{copy.titles.functionalReport}</h2>
         </div>
         <div className="empty-state">
           <FileText size={20} aria-hidden="true" />
@@ -1061,9 +1069,12 @@ export function ReportPanel({
   return (
     <article className={framed ? 'panel report-panel' : 'report-panel'} id="report">
       <div className="panel-heading split">
-        <div>
+        <div className="report-heading-copy">
           <FileText size={20} aria-hidden="true" />
-          <h2>{localizeText(report.title, language)}</h2>
+          <div>
+            <h2>{copy.titles.functionalReport}</h2>
+            <p className="muted">{localizeText(report.title, language)}</p>
+          </div>
         </div>
         <div className="heading-actions">
           <button
@@ -1132,6 +1143,7 @@ export function TaskWorkspacePanel({
   onCancelRun,
   onCaseUpload,
   onCreateTask,
+  onDeleteTaskLog,
   onDeleteTask,
   onExportMarkdown,
   onCheckDevices,
@@ -1170,6 +1182,7 @@ export function TaskWorkspacePanel({
   onCancelRun?: () => void;
   onCaseUpload?: (event: ChangeEvent<HTMLInputElement>) => void;
   onCreateTask: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteTaskLog?: (runId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onExportMarkdown?: () => void;
   onNavigate?: (page: MenuPage) => void;
@@ -1206,6 +1219,35 @@ export function TaskWorkspacePanel({
       ...(selectedDevice ? { selectedDevice } : {})
     };
   const taskRunLogs = buildTaskRunLogSummaries(currentTask);
+  const latestRunLog = currentTask?.latestRunId
+    ? taskRunLogs.find((runLog) => runLog.runId === currentTask.latestRunId)
+    : taskRunLogs[0];
+  const liveLogEntries = latestRunLog?.entries ?? [];
+  const taskProgress = currentTask ? getTaskProgress(currentTask.status) : 0;
+  const progressSteps = currentTask
+    ? [
+        {
+          key: 'device',
+          label: copy.fields.device,
+          complete: Boolean(selectedDevice || currentTask.deviceSnapshot || currentTask.deviceId)
+        },
+        {
+          key: 'input',
+          label: copy.fields.input,
+          complete: currentTask.input.mode !== 'empty'
+        },
+        {
+          key: 'execute',
+          label: copy.titles.executeTest,
+          complete: Boolean(currentTask.latestRunId)
+        },
+        {
+          key: 'report',
+          label: copy.titles.report,
+          complete: Boolean(report || currentTask.reportPath || isTerminalTaskStatus(currentTask.status))
+        }
+      ]
+    : [];
   const taskModelNotice = getTaskModelChangeNotice(currentTask?.modelSnapshot, modelSettings);
   const runButtonLabel =
     currentTask && (currentTask.latestRunId || currentTask.runIds?.length) && !isActiveTaskStatus(currentTask.status)
@@ -1489,6 +1531,24 @@ export function TaskWorkspacePanel({
                   </div>
                   <StatusPill status={currentTask.status} language={language} />
                 </div>
+                <div className="task-progress-card" data-task-progress-value={taskProgress}>
+                  <Progress
+                    aria-label={copy.titles.runStatus}
+                    className="task-progress-bar"
+                    value={taskProgress}
+                  />
+                  <ol className="task-progress-steps" aria-label={copy.titles.runStatus}>
+                    {progressSteps.map((step) => (
+                      <li
+                        key={step.key}
+                        className={step.complete ? 'task-progress-step complete' : 'task-progress-step'}
+                      >
+                        <CheckCircle2 size={16} aria-hidden="true" />
+                        <span>{step.label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
                 <div className="action-row">
                   <button
                     className="primary-button"
@@ -1524,6 +1584,40 @@ export function TaskWorkspacePanel({
                   ))}
                 </ul>
                 <p>{localizeText(runAction.detail, language)}</p>
+              </section>
+
+              <section className="task-detail-section" data-task-detail-section="live-log">
+                <div className="panel-heading split">
+                  <div>
+                    <Activity size={20} aria-hidden="true" />
+                    <h2>{copy.titles.liveExecutionLog}</h2>
+                  </div>
+                  <StatusPill status={latestRunLog?.status ?? currentTask.status} language={language} />
+                </div>
+                {liveLogEntries.length ? (
+                  <ol className="live-log-list">
+                    {liveLogEntries.map((entry) => (
+                      <li key={entry.id}>
+                        <strong>{localizeText(entry.message, language)}</strong>
+                        <small>
+                          {[
+                            formatDateTime(entry.createdAt, language),
+                            entry.status ? formatStatusLabel(entry.status, language) : '',
+                            entry.reportPath ?? ''
+                          ].filter(Boolean).join(' / ')}
+                        </small>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="empty-state">
+                    <History aria-hidden="true" size={20} />
+                    <div>
+                      <strong>{copy.empty.waitingRunTitle}</strong>
+                      <span>{copy.empty.waitingRunDetail}</span>
+                    </div>
+                  </div>
+                )}
                 {agentMessages.length ? (
                   <ol className="message-list">
                     {agentMessages.map((message) => (
@@ -1540,11 +1634,14 @@ export function TaskWorkspacePanel({
                 <div className="panel-heading split">
                   <div>
                     <History size={20} aria-hidden="true" />
-                    <h2>{copy.titles.taskLogs}</h2>
+                    <div>
+                      <h2>{copy.titles.executionLogHistory}</h2>
+                      <span className="section-kicker">{copy.titles.taskLogs}</span>
+                    </div>
                   </div>
                 </div>
                 {taskRunLogs.length ? (
-                  <ol className="task-run-log-list" aria-label={copy.titles.taskLogs}>
+                  <ol className="task-run-log-list" aria-label={copy.titles.executionLogHistory}>
                     {taskRunLogs.map((runLog) => {
                       const summaryMeta = [
                         formatDateTime(runLog.updatedAt, language),
@@ -1555,37 +1652,51 @@ export function TaskWorkspacePanel({
 
                       return (
                         <li key={runLog.runId} data-task-run-log-id={runLog.runId}>
-                          <details className="task-run-log-details">
-                            <summary className="task-run-log-summary">
-                              <span className="task-run-log-summary-copy">
-                                <strong>{copy.runtime.runSummary(runLog.runId)}</strong>
-                                <small>{summaryMeta.join(' / ')}</small>
-                              </span>
-                              {runLog.status ? (
-                                <StatusPill status={runLog.status} language={language} />
-                              ) : null}
-                            </summary>
-                            {runLog.entries.length ? (
-                              <ol className="task-log-detail-list">
-                                {runLog.entries.map((entry) => {
-                                  const detailMeta = [
-                                    formatDateTime(entry.createdAt, language),
-                                    entry.status ? formatStatusLabel(entry.status, language) : '',
-                                    entry.reportPath ?? ''
-                                  ].filter(Boolean);
+                          <div className="task-run-log-shell">
+                            <details className="task-run-log-details">
+                              <summary className="task-run-log-summary">
+                                <span className="task-run-log-summary-copy">
+                                  <strong>{copy.runtime.runSummary(runLog.runId)}</strong>
+                                  <small>{summaryMeta.join(' / ')}</small>
+                                </span>
+                                {runLog.status ? (
+                                  <StatusPill status={runLog.status} language={language} />
+                                ) : null}
+                              </summary>
+                              {runLog.entries.length ? (
+                                <ol className="task-log-detail-list">
+                                  {runLog.entries.map((entry) => {
+                                    const detailMeta = [
+                                      formatDateTime(entry.createdAt, language),
+                                      entry.status ? formatStatusLabel(entry.status, language) : '',
+                                      entry.reportPath ?? ''
+                                    ].filter(Boolean);
 
-                                  return (
-                                    <li key={entry.id}>
-                                      <strong>{localizeText(entry.message, language)}</strong>
-                                      <small>{detailMeta.join(' / ')}</small>
-                                    </li>
-                                  );
-                                })}
-                              </ol>
-                            ) : (
-                              <p className="muted task-run-log-empty">{copy.empty.noTaskRunDetails}</p>
-                            )}
-                          </details>
+                                    return (
+                                      <li key={entry.id}>
+                                        <strong>{localizeText(entry.message, language)}</strong>
+                                        <small>{detailMeta.join(' / ')}</small>
+                                      </li>
+                                    );
+                                  })}
+                                </ol>
+                              ) : (
+                                <p className="muted task-run-log-empty">{copy.empty.noTaskRunDetails}</p>
+                              )}
+                            </details>
+                            <Button
+                              data-delete-task-log-run-id={runLog.runId}
+                              disabled={!onDeleteTaskLog}
+                              onClick={() => onDeleteTaskLog?.(runLog.runId)}
+                              size="sm"
+                              title={copy.titlesAttr.deleteRunLog}
+                              type="button"
+                              variant="destructive"
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                              {copy.actions.deleteLog}
+                            </Button>
+                          </div>
                         </li>
                       );
                     })}
@@ -2183,6 +2294,42 @@ export function App(): ReactElement {
       });
     } finally {
       setDeletingTaskId('');
+    }
+  }
+
+  async function handleDeleteTaskLog(runId: string): Promise<void> {
+    if (!currentTask) {
+      return;
+    }
+
+    const confirmed =
+      typeof window.confirm === 'function' ? window.confirm(copy.copy.deleteRunLogConfirm(runId)) : true;
+
+    if (!confirmed) {
+      return;
+    }
+
+    setTaskAction({
+      status: 'busy',
+      detail: `Deleting ${runId}.`
+    });
+
+    try {
+      const updatedTask = await api.tasks.deleteLog({
+        taskId: currentTask.id,
+        runId
+      });
+
+      upsertTask(updatedTask);
+      setTaskAction({
+        status: 'success',
+        detail: 'Task run log deleted.'
+      });
+    } catch (error) {
+      setTaskAction({
+        status: 'error',
+        detail: getErrorMessage(error)
+      });
     }
   }
 
@@ -2853,6 +3000,7 @@ export function App(): ReactElement {
               onCaseUpload={(event) => void handleCaseUpload(event)}
               onCreateTask={(event) => void handleCreateTask(event)}
               onCheckDevices={() => void handleCheckDevices()}
+              onDeleteTaskLog={(runId) => void handleDeleteTaskLog(runId)}
               onDeleteTask={(taskId) => void handleDeleteTask(taskId)}
               onExportMarkdown={() => void handleExportReport()}
               onPromptChange={(value) => updateCurrentTaskWorkspaceState({ prompt: value })}

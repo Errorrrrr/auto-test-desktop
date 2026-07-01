@@ -654,6 +654,91 @@ describe('workbench panels', () => {
     expect(html).toContain('/tmp/task-history/reports/task-history.md');
   });
 
+  it('separates progress, live execution logs, deletable log history, and the functional report', () => {
+    const selectedTask = createTask({
+      id: 'task-live',
+      name: 'Live task',
+      status: 'running',
+      targetAppId: 'com.example.live',
+      latestRunId: 'run-live',
+      runIds: ['run-live'],
+      startedAt: '2026-06-25T03:00:00.000Z',
+      updatedAt: '2026-06-25T03:01:00.000Z',
+      logs: [
+        {
+          id: 'log-live-start',
+          kind: 'run_started',
+          message: 'Run started.',
+          createdAt: '2026-06-25T03:00:00.000Z',
+          runId: 'run-live',
+          status: 'queued'
+        },
+        {
+          id: 'log-live-progress',
+          kind: 'input_updated',
+          message: 'Codex is checking the login button.',
+          createdAt: '2026-06-25T03:01:00.000Z',
+          runId: 'run-live',
+          status: 'running'
+        }
+      ]
+    });
+    const report: TaskReport = {
+      taskId: selectedTask.id,
+      runId: 'run-live',
+      title: 'Login functional report',
+      status: 'running',
+      inputMode: 'natural_language',
+      inputSummary: 'Prompt: login smoke',
+      targetDevice: 'Pixel 8 (android-1, android/emulator)',
+      startedAt: '2026-06-25T03:00:00.000Z',
+      endedAt: '2026-06-25T03:01:00.000Z',
+      conclusion: 'Running functional verification',
+      modelSummary: 'gpt-5 (local Codex default)',
+      artifacts: [],
+      markdown: '# Functional test report\n\n- Scenario: Login smoke'
+    };
+
+    const html = renderToStaticMarkup(
+      <TaskWorkspacePanel
+        currentTask={selectedTask}
+        language="en"
+        onCreateTask={() => undefined}
+        onDeleteTaskLog={() => undefined}
+        onSelectTask={() => undefined}
+        onTaskDescriptionChange={() => undefined}
+        onTaskNameChange={() => undefined}
+        report={report}
+        taskAction={{
+          status: 'success',
+          detail: 'Task task-live is running.'
+        }}
+        taskDescription=""
+        taskName=""
+        tasks={[selectedTask]}
+      />
+    );
+
+    expect(html).toContain('data-task-detail-section="progress"');
+    expect(html).toContain('data-task-progress-value="75"');
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('Device');
+    expect(html).toContain('Input');
+    expect(html).toContain('Execute');
+    expect(html).toContain('Report');
+    expect(html).toContain('data-task-detail-section="live-log"');
+    expect(html).toContain('Live Execution Log');
+    expect(html).toContain('Codex is checking the login button.');
+    expect(html).toContain('data-task-detail-section="logs"');
+    expect(html).toContain('Execution Log History');
+    expect(html).toContain('data-delete-task-log-run-id="run-live"');
+    expect(html).toContain('Delete log');
+    expect(html).toContain('data-task-detail-section="report"');
+    expect(html).toContain('Functional Test Report');
+    expect(html).toContain('Login functional report');
+    expect(html).toContain('# Functional test report');
+  });
+
   it('renders task device selection as a compact dropdown inside task details', () => {
     const selectedTask = createTask({
       id: 'task-device-compact',

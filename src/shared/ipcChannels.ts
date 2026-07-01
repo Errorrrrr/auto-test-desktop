@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
     importCase: 'tasks:import-case',
     start: 'tasks:start',
     cancel: 'tasks:cancel',
+    deleteLog: 'tasks:delete-log',
     getReport: 'tasks:get-report',
     exportReport: 'tasks:export-report'
   },

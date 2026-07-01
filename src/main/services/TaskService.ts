@@ -183,6 +183,23 @@ function addUniqueValue(values: string[] | undefined, value: string | undefined)
   return Array.from(new Set([...(values ?? []), value]));
 }
 
+function hasDeletedLogRunId(task: TestTask, runId: string): boolean {
+  return Boolean(task.deletedLogRunIds?.includes(runId));
+}
+
+function filterDeletedRunLogs(task: TestTask): TestTask {
+  const deletedLogRunIds = task.deletedLogRunIds ?? [];
+
+  if (deletedLogRunIds.length === 0 || !task.logs?.length) {
+    return task;
+  }
+
+  return {
+    ...task,
+    logs: task.logs.filter((entry) => !entry.runId || !deletedLogRunIds.includes(entry.runId))
+  };
+}
+
 function clearCurrentRunFields(task: TestTask): TestTask {
   const {
     completedAt: _completedAt,
@@ -276,6 +293,34 @@ export class TaskService {
     await rm(this.storage.getTaskWorkspace(task.id).rootDir, { force: true, recursive: true });
 
     return task;
+  }
+
+  async deleteLog(request: unknown): Promise<TestTask> {
+    const taskId = requireStringField(request, 'taskId');
+    const runId = requireStringField(request, 'runId');
+    const task = await this.syncTaskWithLatestRun(await this.getTask(taskId));
+    const isKnownRun =
+      task.latestRunId === runId ||
+      task.runIds?.includes(runId) ||
+      task.logs?.some((entry) => entry.runId === runId);
+
+    if (!isKnownRun && hasDeletedLogRunId(task, runId)) {
+      return task;
+    }
+
+    if (!isKnownRun) {
+      return task;
+    }
+
+    const nextTask = filterDeletedRunLogs({
+      ...task,
+      deletedLogRunIds: addUniqueValue(task.deletedLogRunIds, runId),
+      updatedAt: new Date().toISOString()
+    });
+
+    await this.persistTask(nextTask);
+
+    return nextTask;
   }
 
   async updateInput(request: unknown): Promise<TestTask> {
@@ -445,16 +490,19 @@ export class TaskService {
     const report = await this.requireReportService().exportTaskMarkdown(task, run);
 
     if (report.filePath) {
-      const nextTask = appendTaskLog({
+      const taskWithReportPath = {
         ...task,
         reportPath: report.filePath,
         reportPaths: addUniqueValue(task.reportPaths, report.filePath),
         updatedAt: new Date().toISOString()
-      }, 'report_generated', 'Markdown report exported.', {
-        reportPath: report.filePath,
-        runId: report.runId,
-        status: report.status
-      });
+      };
+      const nextTask = report.runId && hasDeletedLogRunId(task, report.runId)
+        ? taskWithReportPath
+        : appendTaskLog(taskWithReportPath, 'report_generated', 'Markdown report exported.', {
+            reportPath: report.filePath,
+            runId: report.runId,
+            status: report.status
+          });
 
       await this.persistTask(nextTask);
     }
@@ -554,7 +602,8 @@ export class TaskService {
     const nextCompletedAt = TASK_TERMINAL_STATUSES.has(nextStatus)
       ? run.completedAt ?? run.updatedAt
       : task.completedAt;
-    let nextTask: TestTask = {
+    const isRunLogDeleted = hasDeletedLogRunId(task, run.id);
+    let nextTask: TestTask = filterDeletedRunLogs({
       ...task,
       deviceSnapshot: task.deviceSnapshot ?? getDeviceSnapshot(run),
       modelSnapshot: task.modelSnapshot ?? run.modelSnapshot,
@@ -563,18 +612,20 @@ export class TaskService {
       updatedAt: run.updatedAt,
       ...(nextCompletedAt ? { completedAt: nextCompletedAt } : {}),
       ...(run.failureReason ? { failureReason: run.failureReason } : {})
-    };
-
-    nextTask = appendUniqueRunLog(nextTask, 'run_started', run.id, 'Run started.', {
-      createdAt: run.startedAt ?? run.createdAt,
-      status: nextStatus
     });
 
-    if (TASK_TERMINAL_STATUSES.has(nextStatus)) {
-      nextTask = appendUniqueRunLog(nextTask, 'run_completed', run.id, 'Run finished.', {
-        createdAt: nextCompletedAt ?? run.updatedAt,
+    if (!isRunLogDeleted) {
+      nextTask = appendUniqueRunLog(nextTask, 'run_started', run.id, 'Run started.', {
+        createdAt: run.startedAt ?? run.createdAt,
         status: nextStatus
       });
+
+      if (TASK_TERMINAL_STATUSES.has(nextStatus)) {
+        nextTask = appendUniqueRunLog(nextTask, 'run_completed', run.id, 'Run finished.', {
+          createdAt: nextCompletedAt ?? run.updatedAt,
+          status: nextStatus
+        });
+      }
     }
 
     if (JSON.stringify(nextTask) === JSON.stringify(task)) {

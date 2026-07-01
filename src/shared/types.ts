@@ -263,6 +263,7 @@ export interface TestTask {
   reportPath?: string;
   reportPaths?: string[];
   runIds?: string[];
+  deletedLogRunIds?: string[];
   logs?: TaskLogEntry[];
   workspacePath: string;
   createdAt: string;
@@ -280,6 +281,10 @@ export interface TaskCreateRequest {
 
 export interface TaskIdRequest {
   taskId: string;
+}
+
+export interface TaskDeleteLogRequest extends TaskIdRequest {
+  runId: string;
 }
 
 export interface TaskUpdateInputRequest extends TaskIdRequest {
@@ -452,6 +457,7 @@ export interface AppAutoTestApi {
     importCase: (request: TaskImportCaseRequest) => Promise<TestTask>;
     start: (request: TaskStartRequest) => Promise<TestTask>;
     cancel: (taskId: string) => Promise<TestTask>;
+    deleteLog: (request: TaskDeleteLogRequest) => Promise<TestTask>;
     getReport: (taskId: string) => Promise<TaskReport>;
     exportReport: (request: TaskReportExportRequest) => Promise<TaskReport>;
   };

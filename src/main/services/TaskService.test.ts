@@ -454,6 +454,92 @@ describe('TaskService', () => {
     );
   });
 
+  it('deletes one run log group without deleting the task or report artifacts', async () => {
+    const { rootDir, tasks } = await createTaskServices();
+    const sourcePath = join(rootDir, 'smoke.yaml');
+    const task = await tasks.create({ name: 'Delete run log task' });
+
+    await writeFile(sourcePath, 'appId: com.example.app\n- launchApp\n', 'utf8');
+    const readyTask = await tasks.importCase({ taskId: task.id, sourcePath });
+    const firstQueuedTask = await tasks.start({
+      taskId: readyTask.id,
+      deviceId: connectedDevice.id
+    });
+    const firstCompletedTask = await waitForTaskStatus(tasks, task.id, ['succeeded']);
+    const report = await tasks.exportReport({
+      taskId: firstCompletedTask.id,
+      format: 'markdown'
+    });
+    const secondQueuedTask = await tasks.start({
+      taskId: firstCompletedTask.id,
+      deviceId: connectedDevice.id
+    });
+    await waitForTaskStatus(tasks, task.id, ['succeeded']);
+
+    const updatedTask = await tasks.deleteLog({
+      taskId: task.id,
+      runId: firstQueuedTask.latestRunId
+    });
+
+    expect(updatedTask.id).toBe(task.id);
+    expect(updatedTask.runIds).toContain(secondQueuedTask.latestRunId);
+    expect(updatedTask.logs?.some((entry) => entry.runId === firstQueuedTask.latestRunId)).toBe(false);
+    expect(updatedTask.logs?.some((entry) => entry.runId === secondQueuedTask.latestRunId)).toBe(true);
+    expect(updatedTask.reportPaths).toContain(report.filePath);
+    expect(await tasks.getReport({ taskId: task.id })).toMatchObject({
+      taskId: task.id,
+      runId: secondQueuedTask.latestRunId
+    });
+  });
+
+  it('does not rehydrate latest run logs after they are deleted and the task is synced', async () => {
+    const { rootDir, tasks } = await createTaskServices();
+    const sourcePath = join(rootDir, 'smoke.yaml');
+    const task = await tasks.create({ name: 'Delete latest run log task' });
+
+    await writeFile(sourcePath, 'appId: com.example.app\n- launchApp\n', 'utf8');
+    const readyTask = await tasks.importCase({ taskId: task.id, sourcePath });
+    await tasks.start({
+      taskId: readyTask.id,
+      deviceId: connectedDevice.id
+    });
+    const completedTask = await waitForTaskStatus(tasks, task.id, ['succeeded']);
+    const deletedRunId = completedTask.latestRunId;
+
+    expect(deletedRunId).toEqual(expect.stringMatching(/^run-/));
+
+    if (!deletedRunId) {
+      throw new Error('Expected completed task to have a latest run id.');
+    }
+
+    expect(completedTask.logs?.some((entry) => entry.runId === deletedRunId)).toBe(true);
+
+    const deletedTask = await tasks.deleteLog({
+      taskId: task.id,
+      runId: deletedRunId
+    });
+
+    expect(deletedTask.deletedLogRunIds).toContain(deletedRunId);
+    expect(deletedTask.logs?.some((entry) => entry.runId === deletedRunId)).toBe(false);
+
+    const fetchedTask = await tasks.get({ taskId: task.id });
+    const listedTask = (await tasks.list()).find((candidate) => candidate.id === task.id);
+    const report = await tasks.getReport({ taskId: task.id });
+    const taskAfterReportRead = await tasks.get({ taskId: task.id });
+
+    expect(fetchedTask.deletedLogRunIds).toContain(deletedRunId);
+    expect(fetchedTask.logs?.some((entry) => entry.runId === deletedRunId)).toBe(false);
+    expect(listedTask?.deletedLogRunIds).toContain(deletedRunId);
+    expect(listedTask?.logs?.some((entry) => entry.runId === deletedRunId)).toBe(false);
+    expect(report).toMatchObject({
+      taskId: task.id,
+      runId: deletedRunId,
+      status: 'succeeded'
+    });
+    expect(taskAfterReportRead.deletedLogRunIds).toContain(deletedRunId);
+    expect(taskAfterReportRead.logs?.some((entry) => entry.runId === deletedRunId)).toBe(false);
+  });
+
   it('runs natural-language-only execution through Codex without generating local YAML', async () => {
     const { agentProvider, tasks } = await createTaskServices();
     const task = await tasks.create({ name: 'Prompt task' });
