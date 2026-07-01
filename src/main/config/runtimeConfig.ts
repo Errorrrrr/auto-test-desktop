@@ -43,7 +43,7 @@ export interface RuntimeConfig {
 }
 
 const DEFAULT_MAX_UPLOAD_SIZE_MB = 25;
-const DEFAULT_RUN_TIMEOUT_MS = 300_000;
+const DEFAULT_RUN_TIMEOUT_MS = 600_000;
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   if (!value) {

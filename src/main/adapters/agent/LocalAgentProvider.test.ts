@@ -76,7 +76,8 @@ describe('LocalAgentProvider', () => {
         modelSnapshot,
         prompt: '点击登录',
         targetAppId: 'com.example.app',
-        timeoutMs: 1000
+        timeoutMs: 1000,
+        workspacePath: '/tmp/task-workspace'
       })
     ).resolves.toMatchObject({
       status: 'succeeded',
@@ -88,25 +89,34 @@ describe('LocalAgentProvider', () => {
         '-c',
         'service_tier="fast"',
         'mcp_servers.maestro.command="maestro"',
-        'mcp_servers.maestro.args=["mcp"]',
+        'mcp_servers.maestro.args=["mcp","--no-viewer","--working-dir=/tmp/task-workspace"]',
+        '--disable',
+        'apps',
+        'plugins',
+        'tool_suggest',
+        'shell_tool',
+        'unified_exec',
         'exec',
         '-m',
         'gpt-5',
+        '--ephemeral',
         '--ignore-user-config',
-        '--sandbox',
-        'workspace-write',
-        '--ask-for-approval',
-        'never'
+        '--ignore-rules',
+        '--skip-git-repo-check',
+        '--dangerously-bypass-approvals-and-sandbox'
       ])
     });
     expect(calls[1]?.args.indexOf('-c')).toBeLessThan(calls[1]?.args.indexOf('exec'));
-    expect(calls[1]?.args.indexOf('--ask-for-approval')).toBeLessThan(calls[1]?.args.indexOf('exec'));
     expect(calls[1]?.args.indexOf('--ignore-user-config')).toBeGreaterThan(calls[1]?.args.indexOf('exec'));
+    expect(calls[1]?.args[calls[1]?.args.indexOf('--cd') + 1]).toBe('/tmp/task-workspace');
     expect(calls[1]?.args.at(-1)).toBe('-');
     expect(calls[1]?.options?.input).toContain('Use the configured Maestro MCP tools');
     expect(calls[1]?.options?.input).toContain('/tmp/smoke.yaml');
     expect(calls[1]?.options?.input).toContain('Do not report success after only launching or opening the app');
     expect(calls[1]?.options?.input).toContain('Launch/open/wait steps do not count');
+    expect(calls[1]?.options?.input).toContain('Do not invoke development workflow skills');
+    expect(calls[1]?.options?.input).toContain('For every maestro/run inline YAML flow');
+    expect(calls[1]?.options?.input).toContain('immediately emit the evidence markers');
   });
 
   it('injects a custom Maestro MCP command into the isolated Codex execution config', async () => {
@@ -271,6 +281,37 @@ describe('LocalAgentProvider', () => {
     ).resolves.toMatchObject({
       status: 'failed',
       failureReason: expect.stringContaining('TEST_RESULT')
+    });
+  });
+
+  it('does not treat echoed prompt markers in stderr as the Codex result', async () => {
+    const execFile: ExecFile = async () => ({
+      stdout: '',
+      stderr:
+        'user\nEnd your final answer with exactly one result marker: TEST_RESULT: passed or TEST_RESULT: failed.\n'
+    });
+    const provider = new LocalAgentProvider({
+      command: 'codex',
+      execFile,
+      provider: 'codex'
+    });
+
+    await expect(
+      provider.runTest({
+        device: {
+          id: 'emulator-5554',
+          name: 'Pixel',
+          platform: 'android',
+          type: 'emulator',
+          connected: true
+        },
+        modelSnapshot,
+        prompt: '设置页面为英文',
+        timeoutMs: 1000
+      })
+    ).resolves.toMatchObject({
+      status: 'failed',
+      failureReason: 'Codex did not report a TEST_RESULT marker, so the test outcome is unknown.'
     });
   });
 });

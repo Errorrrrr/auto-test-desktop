@@ -406,7 +406,8 @@ describe('TaskService', () => {
         modelName: 'gpt-5',
         source: 'app_default'
       }),
-      timeoutMs: 1_500
+      timeoutMs: 1_500,
+      workspacePath: readyTask.workspacePath
     });
     expect(completedTask).toMatchObject({
       status: 'succeeded',
@@ -479,7 +480,8 @@ describe('TaskService', () => {
     expect(agentProvider.runTestRequests[0]).toMatchObject({
       casePath: undefined,
       prompt: '点击 登录，输入 alice，看到 首页',
-      targetAppId: 'com.example.app'
+      targetAppId: 'com.example.app',
+      workspacePath: readyTask.workspacePath
     });
     expect(completedTask).toMatchObject({
       status: 'succeeded',

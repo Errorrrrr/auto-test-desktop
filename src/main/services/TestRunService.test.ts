@@ -318,6 +318,23 @@ describe('TestRunService', () => {
     });
   });
 
+  it('passes task workspaces through to the Codex task executor', async () => {
+    const { agentProvider, runs } = await createRunService();
+    const run = await runs.startForTask({
+      deviceId: connectedDevice.id,
+      prompt: '设置页面为英文',
+      taskId: 'task-language',
+      workspacePath: '/tmp/tasks/task-language'
+    });
+    await waitForStatus(runs, run.id, ['succeeded']);
+
+    expect(agentProvider.runTestRequests[0]).toMatchObject({
+      prompt: '设置页面为英文',
+      taskId: 'task-language',
+      workspacePath: '/tmp/tasks/task-language'
+    });
+  });
+
   it.each([
     {
       expectedStatus: 'failed' as const,

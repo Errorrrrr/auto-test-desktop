@@ -19,6 +19,7 @@ export interface AgentTestExecutionRequest {
   targetAppId?: string;
   taskId?: string;
   timeoutMs?: number;
+  workspacePath?: string;
 }
 
 export interface AgentTestExecutionResult {

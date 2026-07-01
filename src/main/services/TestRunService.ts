@@ -30,6 +30,7 @@ export interface TaskRunStartRequest {
   modelSnapshot?: CodexModelSnapshot;
   prompt?: string;
   targetAppId?: string;
+  workspacePath?: string;
 }
 
 const TERMINAL_STATUSES = new Set<TestRun['status']>([
@@ -200,7 +201,8 @@ export class TestRunService {
     await this.recordRun(run);
     void this.executeRun(run.id, {
       flowPath: request.flowPath,
-      targetAppId: request.targetAppId
+      targetAppId: request.targetAppId,
+      workspacePath: request.workspacePath
     });
 
     return run;
@@ -270,6 +272,7 @@ export class TestRunService {
     options: {
       flowPath?: string;
       targetAppId?: string;
+      workspacePath?: string;
     }
   ): Promise<void> {
     const startedAt = new Date().toISOString();
@@ -315,7 +318,8 @@ export class TestRunService {
         signal: abortController.signal,
         targetAppId: options.targetAppId,
         taskId: running.taskId,
-        timeoutMs: this.runTimeoutMs
+        timeoutMs: this.runTimeoutMs,
+        workspacePath: options.workspacePath
       });
       const current = await this.getRun(runId);
 

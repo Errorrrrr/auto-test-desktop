@@ -121,6 +121,10 @@ export class LocalAgentProvider implements AgentProvider {
     }
 
     const prompt = buildCodexExecutionPrompt(request);
+    const executionWorkspace = request.workspacePath?.trim() || process.cwd();
+    const maestroMcpArgs = ['mcp', '--no-viewer', `--working-dir=${executionWorkspace}`];
+    // Maestro MCP controls local devices and is cancelled by Codex's workspace sandbox.
+    // Disable shell tools so bypassing the sandbox only exposes the explicit MCP server.
     const args = [
       '-c',
       `service_tier="${this.codexServiceTier}"`,
@@ -129,17 +133,27 @@ export class LocalAgentProvider implements AgentProvider {
       '-c',
       `mcp_servers.maestro.command=${toTomlString(this.maestroMcpCommand)}`,
       '-c',
-      'mcp_servers.maestro.args=["mcp"]',
-      '--ask-for-approval',
-      'never',
+      `mcp_servers.maestro.args=${toTomlStringArray(maestroMcpArgs)}`,
+      '--disable',
+      'apps',
+      '--disable',
+      'plugins',
+      '--disable',
+      'tool_suggest',
+      '--disable',
+      'shell_tool',
+      '--disable',
+      'unified_exec',
       'exec',
       '-m',
       request.modelSnapshot.modelName,
+      '--ephemeral',
       '--ignore-user-config',
+      '--ignore-rules',
       '--cd',
-      process.cwd(),
-      '--sandbox',
-      'workspace-write',
+      executionWorkspace,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--skip-git-repo-check',
       '-'
     ];
 
@@ -151,7 +165,7 @@ export class LocalAgentProvider implements AgentProvider {
       });
 
       return {
-        ...parseCodexResult(stdout, stderr),
+        ...parseCodexResult(stdout),
         stdout,
         stderr
       };
@@ -173,6 +187,8 @@ export class LocalAgentProvider implements AgentProvider {
 function buildCodexExecutionPrompt(request: AgentTestExecutionRequest): string {
   const lines = [
     'You are executing a mobile app automation test for the desktop test client.',
+    'This is not a software development, code review, build, deployment, or bugfix task.',
+    'Do not invoke development workflow skills, repository AGENTS instructions, codebase analysis, or CodeGraph.',
     'Use the configured Maestro MCP tools to run the test. Do not execute the local maestro CLI.',
     'The app will read your final answer to determine the run result.',
     'Do not report success after only launching or opening the app.',
@@ -184,6 +200,11 @@ function buildCodexExecutionPrompt(request: AgentTestExecutionRequest): string {
     'Launch/open/wait steps do not count toward TEST_NON_LAUNCH_ACTIONS_EXECUTED or TEST_ASSERTIONS_PASSED.',
     'For TEST_RESULT: passed, TEST_NON_LAUNCH_ACTIONS_EXECUTED and TEST_ASSERTIONS_PASSED must both be greater than zero, and TEST_INSTRUCTION_COMPLETED must be yes.',
     'End your final answer with exactly one result marker: TEST_RESULT: passed or TEST_RESULT: failed.',
+    'Keep the run bounded. Prefer one complete Maestro flow after inspecting the current screen.',
+    'For every maestro/run inline YAML flow, include the required top-level config section before ---.',
+    'Use appId from Target App ID when it is provided; otherwise use the foreground app package if Maestro screen context exposes it.',
+    'Do not call maestro/cheat_sheet unless a syntax-valid inline flow fails twice.',
+    'After the final observation or assertion, stop calling tools and immediately emit the evidence markers and final TEST_RESULT.',
     '',
     'Target device:',
     `- id: ${request.device.id}`,
@@ -226,12 +247,9 @@ function buildCodexExecutionPrompt(request: AgentTestExecutionRequest): string {
   return lines.join('\n');
 }
 
-function parseCodexResult(
-  stdout: string,
-  stderr: string
-): Pick<AgentTestExecutionResult, 'status' | 'failureReason'> {
-  const combined = `${stdout}\n${stderr}`;
-  const failed = combined.match(/TEST_RESULT:\s*(failed|fail|failure|blocked|error)\b/i);
+function parseCodexResult(stdout: string): Pick<AgentTestExecutionResult, 'status' | 'failureReason'> {
+  const output = stdout.trim();
+  const failed = output.match(/TEST_RESULT:\s*(failed|fail|failure|blocked|error)\b/i);
 
   if (failed) {
     return {
@@ -240,8 +258,8 @@ function parseCodexResult(
     };
   }
 
-  if (/TEST_RESULT:\s*(passed|pass|success|succeeded)\b/i.test(combined)) {
-    const evidenceFailureReason = getExecutionEvidenceFailureReason(combined);
+  if (/TEST_RESULT:\s*(passed|pass|success|succeeded)\b/i.test(output)) {
+    const evidenceFailureReason = getExecutionEvidenceFailureReason(output);
 
     if (evidenceFailureReason) {
       return {
@@ -286,4 +304,8 @@ function parseNonNegativeIntegerMarker(output: string, marker: string): number |
 
 function toTomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function toTomlStringArray(values: string[]): string {
+  return JSON.stringify(values);
 }

@@ -50,4 +50,10 @@ describe('runtime config', () => {
     expect(createRuntimeConfig({}).agentCodexModelName).toBe('gpt-5');
     expect(createRuntimeConfig({ AGENT_CODEX_MODEL: ' gpt-5-mini ' }).agentCodexModelName).toBe('gpt-5-mini');
   });
+
+  it('defaults task execution timeout to ten minutes and allows override', () => {
+    expect(createRuntimeConfig({}).runTimeoutMs).toBe(600_000);
+    expect(createRuntimeConfig({ RUN_TIMEOUT_MS: '120000' }).runTimeoutMs).toBe(120_000);
+    expect(createRuntimeConfig({ RUN_TIMEOUT_MS: '0' }).runTimeoutMs).toBe(600_000);
+  });
 });

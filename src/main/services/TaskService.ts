@@ -380,7 +380,8 @@ export class TaskService {
       deviceId,
       prompt,
       modelSnapshot: taskForRun.modelSnapshot,
-      targetAppId: taskForRun.targetAppId ?? this.naturalLanguageAppId
+      targetAppId: taskForRun.targetAppId ?? this.naturalLanguageAppId,
+      workspacePath: taskForRun.workspacePath
     });
     const {
       completedAt: _completedAt,
